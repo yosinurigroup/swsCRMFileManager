@@ -281,7 +281,6 @@ function showToast(msg: string) {
         </div>
         <div class="hidden sm:block">
           <p class="text-xs font-semibold leading-tight" style="color:var(--text-primary)">{{session.name}}</p>
-          <p class="text-[10px] leading-tight" style="color:var(--text-tertiary)">{{session.email}}</p>
         </div>
       </div>
     </div>
@@ -487,7 +486,11 @@ function showToast(msg: string) {
           <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download</button>
         </div>
         <!-- Google Drive iframe preview (PDF, Office, images, etc.) -->
-        <iframe v-else-if="dm.canPreview(dm.selected.value)" :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
+        <div v-else-if="dm.canPreview(dm.selected.value)" class="relative w-full h-full">
+          <iframe :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
+          <!-- Cover Google Drive's "open in new tab" icon -->
+          <div style="position:absolute;top:0;right:0;width:56px;height:56px;background:var(--surface-elevated);z-index:10;pointer-events:all"></div>
+        </div>
         <!-- Fallback -->
         <div v-else class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
           <div class="w-20 h-20 rounded-3xl flex items-center justify-center" :style="{background:dm.fileColor(dm.selected.value)+'15'}">
