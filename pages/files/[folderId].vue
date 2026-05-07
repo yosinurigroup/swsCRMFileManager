@@ -353,7 +353,7 @@ function showToast(msg: string) {
   <!-- BODY -->
   <div class="flex flex-1 min-h-0 overflow-hidden">
     <!-- FILE LIST -->
-    <div class="flex flex-col min-h-0 overflow-hidden transition-all duration-300" :style="{width: dm.selected.value?'380px':'100%', minWidth: dm.selected.value?'380px':'0', borderRight: dm.selected.value?'1px solid var(--border-subtle)':'none'}">
+    <div class="flex flex-col min-h-0 overflow-hidden transition-all duration-300" :style="{width: dm.selected.value?'50%':'100%', minWidth: dm.selected.value?'50%':'0', borderRight: dm.selected.value?'1px solid var(--border-subtle)':'none'}">
       <!-- Column header -->
       <div class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
         <div class="w-5 shrink-0"></div>
