@@ -1,7 +1,18 @@
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const IMAGE_MIMES = ['image/jpeg','image/png','image/gif','image/webp','image/svg+xml']
-const VIDEO_MIMES = ['video/mp4','video/webm','video/quicktime']
-const PREVIEWABLE = [...IMAGE_MIMES,...VIDEO_MIMES,'application/pdf','application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet','application/vnd.google-apps.presentation']
+const VIDEO_MIMES = ['video/mp4','video/webm','video/quicktime','video/x-msvideo','video/x-matroska']
+const AUDIO_MIMES = ['audio/mpeg','audio/mp3','audio/wav','audio/ogg','audio/aac','audio/flac','audio/x-m4a','audio/mp4']
+const OFFICE_DOC_MIMES = ['application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+const OFFICE_SHEET_MIMES = ['application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+const OFFICE_PRES_MIMES = ['application/vnd.ms-powerpoint','application/vnd.openxmlformats-officedocument.presentationml.presentation']
+const ARCHIVE_MIMES = ['application/zip','application/x-zip-compressed','application/x-rar-compressed','application/vnd.rar','application/x-7z-compressed','application/gzip']
+const PREVIEWABLE = [
+  ...IMAGE_MIMES, ...VIDEO_MIMES, ...AUDIO_MIMES,
+  ...OFFICE_DOC_MIMES, ...OFFICE_SHEET_MIMES, ...OFFICE_PRES_MIMES,
+  'application/pdf',
+  'application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet','application/vnd.google-apps.presentation',
+  'text/plain','text/html','text/csv',
+]
 
 export interface DriveFile {
   id: string; name: string; mimeType: string; size?: string
@@ -67,6 +78,8 @@ export function useDriveManager(rootId: Ref<string>) {
   function canPreview(f: DriveFile) { return PREVIEWABLE.includes(f.mimeType) }
   function isFolder(f: DriveFile) { return f.mimeType === FOLDER_MIME }
   function isImage(f: DriveFile) { return IMAGE_MIMES.includes(f.mimeType) }
+  function isAudio(f: DriveFile) { return AUDIO_MIMES.includes(f.mimeType) }
+  function isArchive(f: DriveFile) { return ARCHIVE_MIMES.includes(f.mimeType) }
 
   function downloadFile(f: DriveFile) {
     const a = document.createElement('a'); a.href = `/api/drive/download?fileId=${f.id}`; a.download = f.name; a.click()
@@ -133,9 +146,12 @@ export function useDriveManager(rootId: Ref<string>) {
     if (f.mimeType==='application/pdf') return 'i-lucide-file-text'
     if (IMAGE_MIMES.includes(f.mimeType)) return 'i-lucide-image'
     if (VIDEO_MIMES.includes(f.mimeType)) return 'i-lucide-video'
-    if (f.mimeType?.includes('spreadsheet')) return 'i-lucide-table'
-    if (f.mimeType?.includes('document')) return 'i-lucide-file-text'
-    if (f.mimeType?.includes('presentation')) return 'i-lucide-presentation'
+    if (AUDIO_MIMES.includes(f.mimeType)) return 'i-lucide-music'
+    if (ARCHIVE_MIMES.includes(f.mimeType)) return 'i-lucide-archive'
+    if ([...OFFICE_SHEET_MIMES].includes(f.mimeType) || f.mimeType?.includes('spreadsheet')) return 'i-lucide-table'
+    if ([...OFFICE_DOC_MIMES].includes(f.mimeType) || f.mimeType?.includes('document')) return 'i-lucide-file-text'
+    if ([...OFFICE_PRES_MIMES].includes(f.mimeType) || f.mimeType?.includes('presentation')) return 'i-lucide-presentation'
+    if (f.mimeType?.startsWith('text/')) return 'i-lucide-file-code'
     return 'i-lucide-file'
   }
   function fileColor(f: DriveFile) {
@@ -143,9 +159,12 @@ export function useDriveManager(rootId: Ref<string>) {
     if (f.mimeType==='application/pdf') return '#ef4444'
     if (IMAGE_MIMES.includes(f.mimeType)) return '#8b5cf6'
     if (VIDEO_MIMES.includes(f.mimeType)) return '#ec4899'
-    if (f.mimeType?.includes('spreadsheet')) return '#10b981'
-    if (f.mimeType?.includes('document')) return '#3b82f6'
-    if (f.mimeType?.includes('presentation')) return '#f97316'
+    if (AUDIO_MIMES.includes(f.mimeType)) return '#06b6d4'
+    if (ARCHIVE_MIMES.includes(f.mimeType)) return '#78716c'
+    if ([...OFFICE_SHEET_MIMES].includes(f.mimeType) || f.mimeType?.includes('spreadsheet')) return '#10b981'
+    if ([...OFFICE_DOC_MIMES].includes(f.mimeType) || f.mimeType?.includes('document')) return '#3b82f6'
+    if ([...OFFICE_PRES_MIMES].includes(f.mimeType) || f.mimeType?.includes('presentation')) return '#f97316'
+    if (f.mimeType?.startsWith('text/')) return '#64748b'
     return '#6b7280'
   }
   function formatSize(s?: string) {
@@ -164,7 +183,7 @@ export function useDriveManager(rootId: Ref<string>) {
     folderStack, files, loading, error, selected, previewLoaded, rootFolderName,
     currentFolderId, sorted, folderCount, fileCount,
     fetchFiles, openFolder, goBack, goToRoot, goToBreadcrumb, openFile,
-    previewUrl, canPreview, isFolder, isImage, downloadFile, openExternal, openInDrive,
+    previewUrl, canPreview, isFolder, isImage, isAudio, isArchive, downloadFile, openExternal, openInDrive,
     renameFile, createFolder, moveFile, copyFile, deleteFile, uploadFiles,
     fileIcon, fileColor, formatSize, formatDate
   }

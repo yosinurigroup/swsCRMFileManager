@@ -446,12 +446,33 @@ function showToast(msg: string) {
         <button class="btn-icon" @click="dm.selected.value=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
       </div>
       <div class="relative flex-1 min-h-0 overflow-hidden">
-        <iframe v-if="dm.canPreview(dm.selected.value)" :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
+        <!-- Audio player -->
+        <div v-if="dm.isAudio(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-6 p-12">
+          <div class="w-28 h-28 rounded-3xl flex items-center justify-center" style="background:rgba(6,182,212,0.1)">
+            <Icon name="i-lucide-music" class="w-14 h-14" style="color:#06b6d4"/>
+          </div>
+          <p class="text-sm font-semibold truncate max-w-full" style="color:var(--text-primary)">{{dm.selected.value.name}}</p>
+          <audio controls class="w-full max-w-md" style="border-radius:12px" :src="`/api/drive/download?fileId=${dm.selected.value.id}`"></audio>
+        </div>
+        <!-- Archive info -->
+        <div v-else-if="dm.isArchive(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
+          <div class="w-20 h-20 rounded-3xl flex items-center justify-center" style="background:rgba(120,113,108,0.1)">
+            <Icon name="i-lucide-archive" class="w-10 h-10" style="color:#78716c"/>
+          </div>
+          <p class="font-semibold" style="color:var(--text-primary)">Archive File</p>
+          <p class="text-sm" style="color:var(--text-secondary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.selected.value.name.split('.').pop()?.toUpperCase()}}</p>
+          <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download</button>
+        </div>
+        <!-- Google Drive iframe preview (PDF, Office, images, video, etc.) -->
+        <iframe v-else-if="dm.canPreview(dm.selected.value)" :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
+        <!-- Fallback -->
         <div v-else class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
           <div class="w-20 h-20 rounded-3xl flex items-center justify-center" :style="{background:dm.fileColor(dm.selected.value)+'15'}">
             <Icon :name="dm.fileIcon(dm.selected.value)" class="w-10 h-10" :style="{color:dm.fileColor(dm.selected.value)}"/>
           </div>
           <p class="font-semibold" style="color:var(--text-primary)">No preview available</p>
+          <p class="text-xs" style="color:var(--text-tertiary)">{{dm.selected.value.mimeType}}</p>
+          <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download to view</button>
         </div>
       </div>
     </div>
