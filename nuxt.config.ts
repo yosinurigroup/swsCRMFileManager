@@ -26,6 +26,10 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
+    auth: {
+      secret: '', // NUXT_AUTH_SECRET
+      apiKey: '', // NUXT_AUTH_API_KEY
+    },
     drive: {
       email: '',
       clientId: '',

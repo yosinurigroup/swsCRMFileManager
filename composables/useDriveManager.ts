@@ -79,7 +79,9 @@ export function useDriveManager(rootId: Ref<string>) {
   function isFolder(f: DriveFile) { return f.mimeType === FOLDER_MIME }
   function isImage(f: DriveFile) { return IMAGE_MIMES.includes(f.mimeType) }
   function isAudio(f: DriveFile) { return AUDIO_MIMES.includes(f.mimeType) }
+  function isVideo(f: DriveFile) { return VIDEO_MIMES.includes(f.mimeType) }
   function isArchive(f: DriveFile) { return ARCHIVE_MIMES.includes(f.mimeType) }
+  function streamUrl(f: DriveFile) { return `/api/drive/stream?fileId=${f.id}` }
 
   function downloadFile(f: DriveFile) {
     const a = document.createElement('a'); a.href = `/api/drive/download?fileId=${f.id}`; a.download = f.name; a.click()
@@ -183,7 +185,7 @@ export function useDriveManager(rootId: Ref<string>) {
     folderStack, files, loading, error, selected, previewLoaded, rootFolderName,
     currentFolderId, sorted, folderCount, fileCount,
     fetchFiles, openFolder, goBack, goToRoot, goToBreadcrumb, openFile,
-    previewUrl, canPreview, isFolder, isImage, isAudio, isArchive, downloadFile, openExternal, openInDrive,
+    previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive, downloadFile, openExternal, openInDrive,
     renameFile, createFolder, moveFile, copyFile, deleteFile, uploadFiles,
     fileIcon, fileColor, formatSize, formatDate
   }

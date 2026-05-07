@@ -5,6 +5,15 @@ const route = useRoute()
 const rootId = computed(() => route.params.folderId as string)
 const dm = useDriveManager(rootId)
 
+// Session
+const session = ref<{authenticated:boolean,email?:string,name?:string,folderId?:string}>({authenticated:false})
+onMounted(async () => {
+  try {
+    const s = await $fetch<any>('/api/auth/session')
+    session.value = s
+  } catch {}
+})
+
 // Total size of all files
 const totalSizeFormatted = computed(() => {
   const total = dm.files.value.reduce((sum, f) => sum + (f.size ? parseInt(f.size) : 0), 0)
@@ -265,6 +274,16 @@ function showToast(msg: string) {
       </button>
       <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileInput">
 
+      <!-- User badge -->
+      <div v-if="session.authenticated" class="flex items-center gap-2 pl-2 ml-1" style="border-left:1px solid var(--border-subtle)">
+        <div class="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0" style="background:linear-gradient(135deg,#1da462,#0f7b3f)">
+          {{(session.name || session.email || 'U').charAt(0).toUpperCase()}}
+        </div>
+        <div class="hidden sm:block">
+          <p class="text-xs font-semibold leading-tight" style="color:var(--text-primary)">{{session.name}}</p>
+          <p class="text-[10px] leading-tight" style="color:var(--text-tertiary)">{{session.email}}</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -419,8 +438,8 @@ function showToast(msg: string) {
           </div>
           <span v-if="!dm.selected.value" class="w-16 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.isFolder(f) ? '—' : dm.formatSize(f.size)}}</span>
           <span v-if="!dm.selected.value" class="w-24 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.formatDate(f.modifiedTime)}}</span>
-          <!-- Inline actions (always visible) -->
-          <div class="flex items-center gap-0.5 shrink-0">
+          <!-- Inline actions (always visible, fixed width) -->
+          <div class="flex items-center gap-0.5 shrink-0" style="width:148px;justify-content:flex-end">
             <button class="btn-icon" style="width:28px;height:28px" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5" style="color:#f59e0b"/></button>
             <button class="btn-icon" style="width:28px;height:28px" title="Move" @click.stop="startMove(f)"><Icon name="i-lucide-folder-symlink" class="w-3.5 h-3.5" style="color:#8b5cf6"/></button>
             <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Copy" @click.stop="doCopy(f)"><Icon name="i-lucide-copy" class="w-3.5 h-3.5" style="color:#6b7280"/></button>
@@ -446,13 +465,17 @@ function showToast(msg: string) {
         <button class="btn-icon" @click="dm.selected.value=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
       </div>
       <div class="relative flex-1 min-h-0 overflow-hidden">
+        <!-- Video player -->
+        <div v-if="dm.isVideo(dm.selected.value)" class="flex items-center justify-center h-full p-4" style="background:#000">
+          <video controls autoplay class="max-w-full max-h-full rounded-lg" :src="dm.streamUrl(dm.selected.value)" :key="dm.selected.value.id"></video>
+        </div>
         <!-- Audio player -->
-        <div v-if="dm.isAudio(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-6 p-12">
+        <div v-else-if="dm.isAudio(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-6 p-12">
           <div class="w-28 h-28 rounded-3xl flex items-center justify-center" style="background:rgba(6,182,212,0.1)">
             <Icon name="i-lucide-music" class="w-14 h-14" style="color:#06b6d4"/>
           </div>
           <p class="text-sm font-semibold truncate max-w-full" style="color:var(--text-primary)">{{dm.selected.value.name}}</p>
-          <audio controls class="w-full max-w-md" style="border-radius:12px" :src="`/api/drive/download?fileId=${dm.selected.value.id}`"></audio>
+          <audio controls class="w-full max-w-md" style="border-radius:12px" :src="dm.streamUrl(dm.selected.value)" :key="dm.selected.value.id"></audio>
         </div>
         <!-- Archive info -->
         <div v-else-if="dm.isArchive(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
@@ -463,7 +486,7 @@ function showToast(msg: string) {
           <p class="text-sm" style="color:var(--text-secondary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.selected.value.name.split('.').pop()?.toUpperCase()}}</p>
           <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download</button>
         </div>
-        <!-- Google Drive iframe preview (PDF, Office, images, video, etc.) -->
+        <!-- Google Drive iframe preview (PDF, Office, images, etc.) -->
         <iframe v-else-if="dm.canPreview(dm.selected.value)" :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
         <!-- Fallback -->
         <div v-else class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
