@@ -12,5 +12,6 @@ export default defineEventHandler((event) => {
     email: session.email,
     name: session.name,
     folderId: session.folderId,
+    salesRep: session.salesRep || '',
   }
 })

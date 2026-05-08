@@ -2,9 +2,11 @@ export default defineEventHandler((event) => {
   const url = getRequestURL(event)
   const path = url.pathname
 
-  // Only protect /files/* routes and /api/drive/* routes
-  const isProtectedPage = path.startsWith('/files/')
-  const isProtectedApi = path.startsWith('/api/drive/')
+  // Protected routes
+  const isFilePage = path.startsWith('/files/')
+  const isReportPage = path.startsWith('/report/')
+  const isProtectedPage = isFilePage || isReportPage
+  const isProtectedApi = path.startsWith('/api/drive/') || path.startsWith('/api/bq/')
 
   // Skip auth routes
   if (path.startsWith('/api/auth/')) return
@@ -31,13 +33,21 @@ export default defineEventHandler((event) => {
     return sendRedirect(event, '/unauthorized')
   }
 
-  // Verify the folder being accessed matches the session
-  if (isProtectedPage) {
+  // Verify browser fingerprint — prevents cross-browser reuse
+  const fpCookie = getCookie(event, 'sws_fp')
+  if (session.fp && fpCookie !== session.fp) {
+    deleteCookie(event, 'sws_session', { path: '/' })
+    deleteCookie(event, 'sws_fp', { path: '/' })
+    if (isProtectedApi) {
+      throw createError({ statusCode: 401, statusMessage: 'Session invalid for this browser' })
+    }
+    return sendRedirect(event, '/unauthorized')
+  }
+
+  // Verify folder access for file pages
+  if (isFilePage) {
     const requestedFolder = path.replace('/files/', '').split('/')[0]
     if (requestedFolder && session.folderId && requestedFolder !== session.folderId) {
-      if (isProtectedApi) {
-        throw createError({ statusCode: 403, statusMessage: 'Access denied to this folder' })
-      }
       return sendRedirect(event, '/unauthorized')
     }
   }

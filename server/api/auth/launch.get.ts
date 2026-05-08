@@ -4,6 +4,8 @@ export default defineEventHandler(async (event) => {
     email?: string
     name?: string
     key?: string
+    redirect?: string
+    salesRep?: string
   }
 
   const config = useRuntimeConfig()
@@ -15,28 +17,36 @@ export default defineEventHandler(async (event) => {
   }
 
   // Validate required params
-  if (!query.folder || !query.email) {
-    throw createError({ statusCode: 400, statusMessage: 'Missing required parameters: folder, email' })
+  if (!query.email) {
+    throw createError({ statusCode: 400, statusMessage: 'Missing required parameter: email' })
   }
 
-  // Extract folder ID from URL or use as-is
-  let folderId = query.folder
-  const match = folderId.match(/[-\w]{25,}/)
-  if (match) folderId = match[0]
+  // Extract folder ID from URL or use as-is (optional for report pages)
+  let folderId = ''
+  if (query.folder) {
+    folderId = query.folder
+    const match = folderId.match(/[-\w]{25,}/)
+    if (match) folderId = match[0]
+  }
 
   // Create encrypted session (8-hour expiry)
-  const sessionData = {
+  const sessionData: Record<string, any> = {
     folderId,
     email: query.email,
     name: query.name || 'User',
+    salesRep: query.salesRep || '',
     exp: Date.now() + 8 * 60 * 60 * 1000,
     iat: Date.now(),
     nonce: Math.random().toString(36).slice(2),
   }
 
+  // Browser fingerprint — binds session to this specific browser
+  const fingerprint = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+  sessionData.fp = fingerprint
+
   const encrypted = encryptSession(sessionData)
 
-  // Set httpOnly secure cookie
+  // Set httpOnly secure session cookie
   setCookie(event, 'sws_session', encrypted, {
     httpOnly: true,
     secure: !import.meta.dev,
@@ -45,6 +55,24 @@ export default defineEventHandler(async (event) => {
     path: '/',
   })
 
-  // Redirect to file manager
-  return sendRedirect(event, `/files/${folderId}`)
+  // Set matching fingerprint cookie (also httpOnly)
+  setCookie(event, 'sws_fp', fingerprint, {
+    httpOnly: true,
+    secure: !import.meta.dev,
+    sameSite: 'lax',
+    maxAge: 8 * 60 * 60,
+    path: '/',
+  })
+
+  // Determine redirect target
+  if (query.redirect === 'pm-weekly') {
+    return sendRedirect(event, '/report/pm-weekly')
+  }
+
+  // Default: redirect to file manager
+  if (folderId) {
+    return sendRedirect(event, `/files/${folderId}`)
+  }
+
+  return sendRedirect(event, '/unauthorized')
 })

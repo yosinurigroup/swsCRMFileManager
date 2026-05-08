@@ -36,6 +36,13 @@ export default defineNuxtConfig({
       clientSecret: '',
       refreshToken: '',
     },
+    bigquery: {
+      projectId: '',    // NUXT_BIGQUERY_PROJECT_ID
+      dataset: '',      // NUXT_BIGQUERY_DATASET
+      clientEmail: '',  // NUXT_BIGQUERY_CLIENT_EMAIL
+      privateKeyId: '', // NUXT_BIGQUERY_PRIVATE_KEY_ID
+      privateKey: '',   // NUXT_BIGQUERY_PRIVATE_KEY
+    },
     public: {
       driveEmail: '',
     },
