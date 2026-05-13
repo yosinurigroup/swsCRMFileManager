@@ -68,6 +68,9 @@ export default defineEventHandler(async (event) => {
   if (query.redirect === 'pm-weekly') {
     return sendRedirect(event, '/report/pm-weekly')
   }
+  if (query.redirect === 'general-report') {
+    return sendRedirect(event, '/report/general-report')
+  }
 
   // Default: redirect to file manager
   if (folderId) {
