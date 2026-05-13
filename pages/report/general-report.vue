@@ -382,12 +382,22 @@ const columns = [
 const COL_COUNT = columns.length
 
 function cellValue(p: any, col: typeof columns[0]): string {
-  const raw = p[col.key]
+  let raw = p[col.key]
+  if (raw == null || raw === '') return '—'
+  // BigQuery returns dates/timestamps as { value: '...' } objects — unwrap them
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    raw = raw.value
+  }
   if (raw == null || raw === '') return '—'
   if (col.date) return fmtDate(raw) || '—'
   if (col.resolve === 'email') return resolveName(String(raw))
   if (col.resolve === 'salesRep') return resolveSalesRep(String(raw))
   if (col.resolve === 'vendor') return resolveVendor(String(raw))
+  // Auto-detect date-like strings that weren't marked as date columns
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const d = fmtDate(raw)
+    if (d) return d
+  }
   return String(raw)
 }
 
