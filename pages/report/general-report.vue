@@ -14,6 +14,7 @@ const filterOptions = ref<any>({})
 const filterCounts = ref<Record<string, Record<string, number>>>({})
 const userNameMap = ref<Record<string, string>>({})
 const salesRepMap = ref<Record<string, string>>({})
+const vendorMap = ref<Record<string, string>>({})
 const totalCount = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
@@ -53,6 +54,10 @@ function resolveSalesRep(id: string): string {
   if (!id) return ''
   return salesRepMap.value[id] || id
 }
+function resolveVendor(id: string): string {
+  if (!id) return ''
+  return vendorMap.value[id] || id
+}
 
 // Build dropdown items with labels
 const emailFields = ['projectManagers','financeManagers','engineers','permitCoordinators']
@@ -69,11 +74,12 @@ function dropdownItems(key: string): {value: string, label: string}[] {
 
 onMounted(async () => {
   try {
-    const [s, opts, usersData, salesRepsData] = await Promise.all([
+    const [s, opts, usersData, salesRepsData, vendorsData] = await Promise.all([
       $fetch<any>('/api/auth/session'),
       $fetch<any>('/api/bq/filter-options'),
       $fetch<any>('/api/bq/users'),
       $fetch<any>('/api/bq/sales-reps'),
+      $fetch<any>('/api/bq/vendors'),
     ])
     session.value = s
     filterOptions.value = opts
@@ -99,6 +105,17 @@ onMounted(async () => {
       }
     }
     salesRepMap.value = srMap
+
+    // Build vendor map (Row ID → Vendor Name)
+    const vendorsList: any[] = vendorsData.vendors || []
+    const vMap: Record<string, string> = {}
+    for (const v of vendorsList) {
+      const id = v['Row ID'] || ''
+      if (id) {
+        vMap[id] = v['Vendor Name'] || id
+      }
+    }
+    vendorMap.value = vMap
 
     await fetchProjects()
   } catch (e) { console.error(e) }
@@ -308,7 +325,7 @@ const columns = [
   { key: 'Start-Up Monitor', label: 'Startup Monitor', date: true },
   { key: 'Start-Up Monitor Status', label: 'Startup Monitor Status' },
   { key: 'Branch Name', label: 'Branch Name' },
-  { key: 'Vendor', label: 'Vendor' },
+  { key: 'Vendor', label: 'Vendor', resolve: 'vendor' as const },
   { key: 'Sales Rep', label: 'Sales Rep', resolve: 'salesRep' as const },
   { key: 'Permit Coordinator', label: 'Permit Tech', resolve: 'email' as const },
   { key: 'Engineer', label: 'Engineer', resolve: 'email' as const },
@@ -370,6 +387,7 @@ function cellValue(p: any, col: typeof columns[0]): string {
   if (col.date) return fmtDate(raw) || '—'
   if (col.resolve === 'email') return resolveName(String(raw))
   if (col.resolve === 'salesRep') return resolveSalesRep(String(raw))
+  if (col.resolve === 'vendor') return resolveVendor(String(raw))
   return String(raw)
 }
 
