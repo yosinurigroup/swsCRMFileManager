@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
         'Completion': 'Completion Date',
         'Final': 'Final Date',
         'Start-up / Monitor': 'Start-Up Monitor',
-        'Contract Sign': 'Contract Sign',
+        'Contract Sign': 'Contract sign Date',
       }
       const field = dateFieldMap[query.dateOf]
       if (field) {
