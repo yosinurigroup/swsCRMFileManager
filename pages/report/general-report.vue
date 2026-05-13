@@ -407,12 +407,15 @@ function downloadCSV() {
   const csvRows = [headers.join(',')]
   for (const p of rows) {
     const vals = columns.map(c => {
-      const v = cellValue(p, c)
+      let v = cellValue(p, c)
+      if (v === '\u2014') v = ''  // Replace em-dash placeholder with empty for CSV
       return `"${v.replace(/"/g, '""')}"`
     })
     csvRows.push(vals.join(','))
   }
-  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
+  // Add UTF-8 BOM so Excel reads encoding correctly
+  const BOM = '\uFEFF'
+  const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
