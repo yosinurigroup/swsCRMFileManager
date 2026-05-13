@@ -42,7 +42,7 @@ const solarInstallStatus = ref('')
 const completionStatus = ref('')
 const finalStatus = ref('')
 
-const dateOfOptions = ['SSA','Solar Install','MPU Install','Battery Install','Completion','Final','Start-up / Monitor']
+const dateOfOptions = ['SSA','Solar Install','MPU Install','Battery Install','Completion','Final','Start-up / Monitor','Contract Sign']
 
 // Name resolution: email → display name, or sales rep ID → name
 function resolveName(val: string): string {
@@ -152,13 +152,12 @@ async function fetchProjects() {
     params.limit = String(PAGE_SIZE)
     params.offset = '0'
     const [r] = await Promise.all([
-      $fetch<any>('/api/bq/projects', { params }),
+      $fetch<any>('/api/bq/general-projects', { params }),
       fetchFilterCounts(),
     ])
     projects.value = r.projects || []
     totalCount.value = r.total || 0
     hasMore.value = projects.value.length < totalCount.value
-    await fetchNotes()
   } catch (e) { console.error(e) } finally { loading.value = false }
 }
 
@@ -169,16 +168,10 @@ async function loadMore() {
     const params = buildParams()
     params.limit = String(PAGE_SIZE)
     params.offset = String(projects.value.length)
-    const r = await $fetch<any>('/api/bq/projects', { params })
+    const r = await $fetch<any>('/api/bq/general-projects', { params })
     const newRows = r.projects || []
     projects.value = [...projects.value, ...newRows]
     hasMore.value = projects.value.length < totalCount.value
-    // Fetch notes for new rows
-    const newIds = newRows.map((p: any) => p['Project ID']).filter(Boolean)
-    if (newIds.length) {
-      const nr = await $fetch<any>('/api/bq/notes', { params: { projectIds: newIds.join(',') } })
-      notes.value = [...notes.value, ...(nr.notes || [])]
-    }
   } catch (e) { console.error(e) } finally { loadingMore.value = false }
 }
 
@@ -255,7 +248,7 @@ const filtered = computed(() => {
   if (!search.value) return projects.value
   const q = search.value.toLowerCase()
   return projects.value.filter((p: any) =>
-    [p['Customer Address'], p['Job Status'], p['Project Status'], p['Sales Rep'], p['Branch Name']].filter(Boolean).some(v => String(v).toLowerCase().includes(q))
+    [p['Customer Address'], p['Job Status'], p['Project Status'], p['Sales Rep'], p['Branch Name'], p['Project Type'], p['Vendor'], p['Project Manager'], p['Finance Manager'], p['AHJ']].filter(Boolean).some(v => String(v).toLowerCase().includes(q))
   )
 })
 
@@ -292,19 +285,112 @@ function onTableScroll() {
   }
 }
 
-function downloadPDF() {
+// Column definitions for table rendering
+const columns = [
+  { key: 'Customer Address', label: 'Project Address', minW: '200px' },
+  { key: 'Project Type', label: 'Project Type' },
+  { key: 'Job Status', label: 'Job Status', chip: 'job' as const },
+  { key: 'Project Status', label: 'Project Status', chip: 'project' as const },
+  { key: 'Project Equipment', label: 'Project Equipment' },
+  { key: 'Contract Sign', label: 'Contract Sign', date: true },
+  { key: 'SSA', label: 'SSA', date: true },
+  { key: 'SSA Status', label: 'SSA Status' },
+  { key: 'Solar Install', label: 'Solar Install', date: true },
+  { key: 'Solar Install Status', label: 'Solar Install Status' },
+  { key: 'MPU Installed', label: 'MPU Installed', date: true },
+  { key: 'MPU Install Status', label: 'MPU Install Status' },
+  { key: 'Battery Installed', label: 'Battery Installed', date: true },
+  { key: 'Battery Install Status', label: 'Battery Install Status' },
+  { key: 'Completion Date', label: 'Completion', date: true },
+  { key: 'Completion Status', label: 'Completion Status' },
+  { key: 'Final Date', label: 'Final', date: true },
+  { key: 'Final Status', label: 'Final Status' },
+  { key: 'Start-Up Monitor', label: 'Startup Monitor', date: true },
+  { key: 'Start-Up Monitor Status', label: 'Startup Monitor Status' },
+  { key: 'Branch Name', label: 'Branch Name' },
+  { key: 'Vendor', label: 'Vendor' },
+  { key: 'Sales Rep', label: 'Sales Rep', resolve: 'salesRep' as const },
+  { key: 'Permit Coordinator', label: 'Permit Tech', resolve: 'email' as const },
+  { key: 'Engineer', label: 'Engineer', resolve: 'email' as const },
+  { key: 'Utillity', label: 'Utility' },
+  { key: 'Panels Amount', label: 'Pannels Amount' },
+  { key: 'Watt', label: 'Watt' },
+  { key: 'KW', label: 'KW' },
+  { key: 'Solar Equipment', label: 'Solar Equipment' },
+  { key: 'Project Manager', label: 'Project Manager', resolve: 'email' as const },
+  { key: 'Secondary Project Manager', label: 'Secondary Project Manager', resolve: 'email' as const },
+  { key: 'Project Price', label: 'Project Price' },
+  { key: 'Project Manager VA', label: 'Project Manager VA', resolve: 'email' as const },
+  { key: 'Secondary Project Manager VA', label: 'Secondary PM VA', resolve: 'email' as const },
+  { key: 'Finance Manager', label: 'Finance Manager', resolve: 'email' as const },
+  { key: 'Secondary Finance Manager', label: 'Secondary Finance Manager', resolve: 'email' as const },
+  { key: 'Finance Manager VA', label: 'Finance Manager VA', resolve: 'email' as const },
+  { key: 'Finance Companies', label: 'Finance Companies' },
+  { key: 'Project Close', label: 'Project Close' },
+  { key: 'Finance Ready', label: 'Finance Ready' },
+  { key: 'PM Approve Project', label: 'PM Approve Project' },
+  { key: 'Cold Water Re-Location', label: 'Cold Water Re-Location' },
+  { key: 'EV Charger ft', label: 'EV Charger ft' },
+  { key: 'Trenching ft', label: 'Trenching ft' },
+  { key: 'Solar Removal Amount', label: 'Solar Removal Amount' },
+  { key: 'MPU Location', label: 'MPU Location' },
+  { key: 'MPU Distance ft', label: 'MPU Distance ft' },
+  { key: 'Trenching Type', label: 'Trenching Type' },
+  { key: 'Sub-Panel Amp', label: 'Sub-Panel Amp' },
+  { key: 'Derate Amp', label: 'Derate Amp' },
+  { key: 'Fire Approval Needed', label: 'Fire Approval Needed' },
+  { key: 'Inverter Type', label: 'Inverter Type' },
+  { key: 'Batteries Qty', label: 'Batteries Qty' },
+  { key: 'Sub Panel Qty', label: 'Sub Panel Qty' },
+  { key: 'ESR Phone', label: 'ESR Phone' },
+  { key: 'Fire Department Email', label: 'Fire Department Email' },
+  { key: 'Fire Department Phone', label: 'Fire Department Phone' },
+  { key: 'Fire Department Inspector Email', label: 'Fire Dept Inspector Email' },
+  { key: 'Fire Department Inspector Phone', label: 'Fire Dept Inspector Phone' },
+  { key: 'Fire Inspection', label: 'Fire Inspection' },
+  { key: 'Exisiting System', label: 'Exisiting System' },
+  { key: 'Trench Fill', label: 'Trench Fill' },
+  { key: 'Stucco Status', label: 'Stucco Status' },
+  { key: 'Trench Fill Status', label: 'Trench Fill Status' },
+  { key: 'Combiner Box', label: 'Combiner Box' },
+  { key: 'Service', label: 'Service' },
+  { key: 'WR#', label: 'WR#' },
+  { key: 'SR#', label: 'SR#' },
+  { key: 'SBP#', label: 'SBP#' },
+  { key: 'AHJ', label: 'AHJ' },
+  { key: 'Last Activity Date', label: 'Last Activity Date', date: true },
+  { key: 'NTP', label: 'NTP' },
+]
+
+const COL_COUNT = columns.length
+
+function cellValue(p: any, col: typeof columns[0]): string {
+  const raw = p[col.key]
+  if (raw == null || raw === '') return '—'
+  if (col.date) return fmtDate(raw) || '—'
+  if (col.resolve === 'email') return resolveName(String(raw))
+  if (col.resolve === 'salesRep') return resolveSalesRep(String(raw))
+  return String(raw)
+}
+
+function downloadCSV() {
   const rows = filtered.value
-  const today = new Date()
-  const reportDate = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}-${today.getFullYear()}`
-  const esc = (s: string) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  const tableRows = rows.map((p: any) => {
-    const pid = p['Project ID'] || ''
-    const pn = getNotesForProject(pid)
-    return `<tr><td>${esc(p['Customer Address']||'—')}</td><td>${esc(p['Job Status']||'')}</td><td>${esc(p['Project Status']||'')}</td><td>${fmtDate(p.SSA)||esc(p['SSA Status']||'')}</td><td>${fmtDate(p['Solar Install'])||esc(p['Solar Install Status']||'')}</td><td>${fmtDate(p['Final Date'])||esc(p['Final Status']||'')}</td><td>${fmtDate(p['PTO Received'])||esc(p['PTO Status']||'')}</td><td>${fmtDate(p['Start-Up Monitor']||p['Completion Date'])||''}</td><td class="notes-cell">${pn?`<div class="nc">${esc(pn).replace(/\n/g,'<br>')}</div>`:''}</td></tr>`
-  }).join('')
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>General Report</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px 40px;color:#111;font-size:11px}h1{font-size:18px;font-weight:700;margin-bottom:4px}.sub{font-size:12px;font-weight:600;margin-bottom:2px}.rd{font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#f4f6f8;font-weight:600;font-size:10px;text-align:left;padding:6px 8px;border:1px solid #d0d5dd;white-space:nowrap}td{padding:5px 8px;border:1px solid #d0d5dd;font-size:10px;vertical-align:top}tr:nth-child(even){background:#fafbfc}.notes-cell{max-width:280px}.nc{font-size:9px;line-height:1.4;color:#333;white-space:pre-line}@media print{body{padding:20px}@page{size:landscape;margin:12mm}}</style></head><body><h1>General Report ${session.value.name||''}</h1><p class="rd">Report Date: ${reportDate} • Total: ${rows.length} projects</p><table><thead><tr><th style="min-width:160px">Project Address</th><th>Job Status</th><th>Project Status</th><th>SSA</th><th>Solar Install</th><th>Final</th><th>PTO</th><th>Start-Up / Monitor</th><th style="min-width:200px">Project Notes</th></tr></thead><tbody>${tableRows}</tbody></table></body></html>`
-  const w = window.open('','_blank')
-  if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 400) }
+  const headers = columns.map(c => c.label)
+  const csvRows = [headers.join(',')]
+  for (const p of rows) {
+    const vals = columns.map(c => {
+      const v = cellValue(p, c)
+      return `"${v.replace(/"/g, '""')}"`
+    })
+    csvRows.push(vals.join(','))
+  }
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `general-report-${new Date().toISOString().slice(0,10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 // Filter config
@@ -431,7 +517,7 @@ onMounted(() => {
       </div>
       <div class="flex items-center gap-2">
         <span class="text-xs font-medium" style="color:var(--text-tertiary)">{{totalCount.toLocaleString()}} projects</span>
-        <button class="btn-primary" @click="downloadPDF"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download PDF</button>
+        <button class="btn-primary" @click="downloadCSV"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
         <button class="btn-icon" style="width:32px;height:32px;border-radius:8px" title="Toggle theme" @click="toggleTheme">
           <Icon :name="colorMode.value === 'dark' ? 'i-lucide-sun' : 'i-lucide-moon'" class="w-4 h-4"/>
         </button>
@@ -578,46 +664,29 @@ onMounted(() => {
         <table v-else class="w-full text-sm" style="border-collapse:collapse">
           <thead class="sticky top-0 z-10">
             <tr style="background:var(--surface-card)">
-              <th class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" style="border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);min-width:340px">Project Address</th>
-              <th class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" style="border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);width:90px">Job Status</th>
-              <th class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" style="border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);width:130px">Project Status</th>
-              <th v-for="h in ['SSA','Solar Install','Final','PTO','Start-Up / Monitor']" :key="h" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" style="border-bottom:1px solid var(--border-subtle);color:var(--text-secondary)">{{h}}</th>
-              <th class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" style="border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);min-width:280px">Project Notes</th>
+              <th v-for="col in columns" :key="col.key" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" :style="{borderBottom:'1px solid var(--border-subtle)',color:'var(--text-secondary)',minWidth: col.minW || 'auto'}">{{col.label}}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in filtered" :key="p['Project ID']||i" class="transition-colors" style="border-bottom:1px solid var(--border-subtle)" :style="{'background': i%2===0 ? 'transparent' : 'var(--surface-card)'}">
-              <td class="px-2 py-1.5 text-xs" style="color:var(--text-primary);min-width:340px">{{p['Customer Address']||'—'}}</td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap"><span v-if="p['Job Status']" class="status-chip" :class="chipClass(p['Job Status'],'job')">{{p['Job Status']}}</span><span v-else style="color:var(--text-tertiary)">—</span></td>
-              <td class="px-2 py-1.5 text-xs" style="width:130px"><span v-if="p['Project Status']" class="status-chip" :class="chipClass(p['Project Status'],'project')" v-html="p['Project Status'].replace(/\s*,\s*|\s+\/\s+/g, '<br>')"></span><span v-else style="color:var(--text-tertiary)">—</span></td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap" style="color:var(--text-secondary)">{{fmtDate(p.SSA)||p['SSA Status']||'—'}}</td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap" style="color:var(--text-secondary)">{{fmtDate(p['Solar Install'])||p['Solar Install Status']||'—'}}</td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap" style="color:var(--text-secondary)">{{fmtDate(p['Final Date'])||p['Final Status']||'—'}}</td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap" style="color:var(--text-secondary)">{{fmtDate(p['PTO Received'])||p['PTO Status']||'—'}}</td>
-              <td class="px-2 py-1.5 text-xs whitespace-nowrap" style="color:var(--text-secondary)">{{fmtDate(p['Start-Up Monitor']||p['Completion Date'])||'—'}}</td>
-              <td class="px-2 py-1.5 text-[10px]" style="color:var(--text-secondary);min-width:280px">
-                <div v-if="getNotesForProject(p['Project ID'])" class="max-h-[200px] overflow-y-auto">
-                  <template v-for="(line, li) in getNotesForProject(p['Project ID']).split('\n')" :key="li">
-                    <div class="py-1 leading-relaxed">{{ line }}</div>
-                    <div v-if="li < getNotesForProject(p['Project ID']).split('\n').length - 1" style="border-bottom:1px solid var(--border-subtle);margin:2px 0"/>
-                  </template>
-                </div>
-                <span v-else style="color:var(--text-tertiary)">—</span>
+              <td v-for="col in columns" :key="col.key" class="px-2 py-1.5 text-xs whitespace-nowrap" :style="{color: cellValue(p, col) === '—' ? 'var(--text-tertiary)' : col.chip ? undefined : 'var(--text-secondary)', minWidth: col.minW || 'auto'}">
+                <span v-if="col.chip && p[col.key]" class="status-chip" :class="chipClass(p[col.key], col.chip)">{{p[col.key]}}</span>
+                <span v-else>{{cellValue(p, col)}}</span>
               </td>
             </tr>
             <!-- Load more row -->
             <tr v-if="loadingMore">
-              <td colspan="9" class="text-center py-4">
+              <td :colspan="COL_COUNT" class="text-center py-4">
                 <Icon name="i-lucide-loader-2" class="w-5 h-5 animate-spin mx-auto" style="color:var(--drive-green)"/>
               </td>
             </tr>
             <tr v-if="hasMore && !loadingMore && filtered.length > 0">
-              <td colspan="9" class="text-center py-3">
+              <td :colspan="COL_COUNT" class="text-center py-3">
                 <span class="text-[11px]" style="color:var(--text-tertiary)">Showing {{filtered.length}} of {{totalCount.toLocaleString()}} — scroll for more</span>
               </td>
             </tr>
             <tr v-if="filtered.length===0 && !loading">
-              <td colspan="9" class="text-center py-16" style="color:var(--text-tertiary)">
+              <td :colspan="COL_COUNT" class="text-center py-16" style="color:var(--text-tertiary)">
                 <Icon name="i-lucide-inbox" class="w-10 h-10 mx-auto mb-2"/>
                 <p>No projects match your filters</p>
               </td>
