@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useSavedReports, REPORT_ICONS } from '~/composables/useSavedReports'
 useHead({ title: 'General Report' })
 
 // Dark/light mode
@@ -682,6 +683,146 @@ onMounted(() => {
     }
   })
 })
+
+// ── Saved Reports ────────────────────────────────────────────────────────────
+const { list: _srList, listSync: _srListSync, save: _srSave, remove: _srRemove, update: _srUpdate } = useSavedReports('general')
+const savedReports = ref<any[]>([])
+const showSaveModal = ref(false)
+const showLoadModal = ref(false)
+const saveName = ref('')
+const saveIcon = ref('📊')
+const activeReportId = ref<string | null>(null)
+const deleteConfirmId = ref<string | null>(null)
+const savedReportSearch = ref('')
+const editingReportId = ref<string | null>(null)
+const editingName = ref('')
+
+function srUser() { return session.value.email || session.value.name || 'guest' }
+
+async function refreshSavedReports() {
+  // Show cached data instantly (sync), then replace with fresh BQ data (async)
+  savedReports.value = _srListSync(srUser())
+  savedReports.value = await _srList(srUser())
+}
+
+watch(() => session.value.name, () => refreshSavedReports(), { immediate: true })
+
+function getCurrentFilters() {
+  return {
+    dateOf: dateOf.value, dateFrom: dateFrom.value, dateTo: dateTo.value,
+    branch: branch.value, vendor: vendor.value, salesRep: salesRep.value,
+    projectType: projectType.value, jobStatus: jobStatus.value, projectStatus: projectStatus.value,
+    projectManager: projectManager.value, financeManager: financeManager.value,
+    engineer: engineer.value, permitCoordinator: permitCoordinator.value,
+    utility: utility.value, solarEquipment: solarEquipment.value,
+    ssaStatus: ssaStatus.value, solarInstallStatus: solarInstallStatus.value,
+    completionStatus: completionStatus.value, finalStatus: finalStatus.value,
+    search: search.value,
+  }
+}
+
+function getFilterLabels(filters: any): string[] {
+  const out: string[] = []
+  if (filters.dateFrom && filters.dateTo) out.push(`${filters.dateOf}: ${filters.dateFrom} → ${filters.dateTo}`)
+  if (filters.branch) out.push(`Branch: ${filters.branch}`)
+  if (filters.salesRep) out.push('Sales Rep')
+  if (filters.vendor) out.push('Vendor')
+  if (filters.jobStatus) out.push(`Job: ${filters.jobStatus}`)
+  if (filters.projectStatus) out.push(`Status: ${filters.projectStatus}`)
+  if (filters.projectType) out.push(`Type: ${filters.projectType}`)
+  if (filters.projectManager) out.push('Project Manager')
+  if (filters.financeManager) out.push('Finance Manager')
+  if (filters.engineer) out.push('Engineer')
+  if (filters.permitCoordinator) out.push('Permit')
+  if (filters.utility) out.push(`Utility: ${filters.utility}`)
+  if (filters.solarEquipment) out.push('Solar Equipment')
+  if (filters.ssaStatus) out.push(`SSA: ${filters.ssaStatus}`)
+  if (filters.solarInstallStatus) out.push(`Solar: ${filters.solarInstallStatus}`)
+  if (filters.completionStatus) out.push(`Completion: ${filters.completionStatus}`)
+  if (filters.finalStatus) out.push(`Final: ${filters.finalStatus}`)
+  if (filters.search) out.push(`"${filters.search}"`)
+  return out
+}
+
+function openSaveModal() {
+  saveName.value = ''
+  saveIcon.value = '📊'
+  showSaveModal.value = true
+}
+
+async function doSaveReport() {
+  if (!saveName.value.trim()) return
+  const tmpl: any = {
+    id: Date.now().toString(),
+    name: saveName.value.trim(),
+    icon: saveIcon.value,
+    createdAt: new Date().toISOString(),
+    filters: getCurrentFilters(),
+    selectedColKeys: [...selectedColKeys.value],
+  }
+  await _srSave(tmpl, srUser())
+  activeReportId.value = tmpl.id
+  showSaveModal.value = false
+  await refreshSavedReports()
+}
+
+function applyReport(report: any) {
+  const f = report.filters || {}
+  dateOf.value = f.dateOf || 'SSA'
+  dateFrom.value = f.dateFrom || ''
+  dateTo.value = f.dateTo || ''
+  branch.value = f.branch || ''
+  vendor.value = f.vendor || ''
+  salesRep.value = f.salesRep || ''
+  projectType.value = f.projectType || ''
+  jobStatus.value = f.jobStatus || ''
+  projectStatus.value = f.projectStatus || ''
+  projectManager.value = f.projectManager || ''
+  financeManager.value = f.financeManager || ''
+  engineer.value = f.engineer || ''
+  permitCoordinator.value = f.permitCoordinator || ''
+  utility.value = f.utility || ''
+  solarEquipment.value = f.solarEquipment || ''
+  ssaStatus.value = f.ssaStatus || ''
+  solarInstallStatus.value = f.solarInstallStatus || ''
+  completionStatus.value = f.completionStatus || ''
+  finalStatus.value = f.finalStatus || ''
+  search.value = f.search || ''
+  if (report.selectedColKeys?.length) {
+    selectedColKeys.value = report.selectedColKeys
+    localStorage.setItem(LS_KEY, JSON.stringify(selectedColKeys.value))
+  }
+  activeReportId.value = report.id
+  showLoadModal.value = false
+}
+
+async function doDeleteReport(id: string) {
+  await _srRemove(id, srUser())
+  if (activeReportId.value === id) activeReportId.value = null
+  deleteConfirmId.value = null
+  savedReports.value = savedReports.value.filter((r: any) => r.id !== id)
+  refreshSavedReports()
+}
+
+function startEditName(report: any) {
+  editingReportId.value = report.id
+  editingName.value = report.name
+}
+
+async function confirmEditName(report: any) {
+  if (!editingName.value.trim()) return
+  await _srUpdate(report.id, { name: editingName.value.trim() }, srUser())
+  editingReportId.value = null
+  await refreshSavedReports()
+}
+
+const filteredSavedReports = computed(() => {
+  if (!savedReportSearch.value) return savedReports.value
+  const q = savedReportSearch.value.toLowerCase()
+  return savedReports.value.filter((r: any) => r.name.toLowerCase().includes(q))
+})
+
+const activeReport = computed(() => savedReports.value.find((r: any) => r.id === activeReportId.value) || null)
 </script>
 
 <template>
@@ -699,6 +840,24 @@ onMounted(() => {
       </div>
       <div class="flex items-center gap-2">
         <span class="text-xs font-medium" style="color:var(--text-tertiary)">{{totalCount.toLocaleString()}} projects</span>
+        <!-- Active report indicator -->
+        <div v-if="activeReport" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold" style="background:color-mix(in srgb,var(--drive-green) 15%,transparent);border:1px solid var(--drive-green);color:var(--drive-green)">
+          <span>{{activeReport.icon}}</span>
+          <span>{{activeReport.name}}</span>
+          <button @click="activeReportId=null" style="opacity:0.6"><Icon name="i-lucide-x" class="w-3 h-3"/></button>
+        </div>
+        <!-- Save report -->
+        <button class="btn-icon flex items-center gap-1.5 px-3" style="height:32px;font-size:12px;font-weight:600" title="Save current report" @click="openSaveModal">
+          <Icon name="i-lucide-bookmark-plus" class="w-3.5 h-3.5" style="color:var(--drive-green)"/>
+          <span class="hidden sm:inline" style="color:var(--text-primary)">Save</span>
+        </button>
+        <!-- Saved reports -->
+        <button class="btn-icon flex items-center gap-1.5 px-3 relative" style="height:32px;font-size:12px;font-weight:600" title="Saved reports" @click="showLoadModal=true;savedReportSearch=''">
+          <Icon name="i-lucide-folder-open" class="w-3.5 h-3.5" style="color:#8b5cf6"/>
+          <span class="hidden sm:inline" style="color:var(--text-primary)">Reports</span>
+          <span v-if="savedReports.length" class="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:#8b5cf6">{{savedReports.length}}</span>
+        </button>
+        <div class="w-px h-5 mx-1" style="background:var(--border-subtle)"/>
         <button class="btn-primary" @click="openColChooser"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
         <button class="btn-primary" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" @click="openPdfColChooser"><Icon name="i-lucide-file-text" class="w-3.5 h-3.5"/>Preview / PDF</button>
         <button class="btn-icon" style="width:32px;height:32px;border-radius:8px" title="Toggle theme" @click="toggleTheme">
@@ -885,6 +1044,162 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- ══ SAVE REPORT MODAL ══════════════════════════════════════════════ -->
+    <div v-if="showSaveModal" class="fixed inset-0 z-[55] flex items-center justify-center" style="background:rgba(0,0,0,0.6)" @click.self="showSaveModal=false">
+      <div class="rounded-2xl shadow-2xl w-[480px] flex flex-col overflow-hidden" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+        <!-- Header -->
+        <div class="px-6 py-5" style="background:linear-gradient(135deg,rgba(29,164,98,0.12),rgba(15,123,63,0.06));border-bottom:1px solid var(--border-subtle)">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style="background:linear-gradient(135deg,#1da462,#0f7b3f)">🔖</div>
+              <div>
+                <h2 class="text-sm font-bold">Save Report Template</h2>
+                <p class="text-[11px]" style="color:var(--text-tertiary)">Save your current filters & columns for quick access</p>
+              </div>
+            </div>
+            <button class="btn-icon" style="width:28px;height:28px" @click="showSaveModal=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
+          </div>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <!-- Icon picker -->
+          <div>
+            <label class="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style="color:var(--text-tertiary)">Choose an icon</label>
+            <div class="flex gap-2 flex-wrap">
+              <button v-for="ic in REPORT_ICONS" :key="ic"
+                class="w-9 h-9 rounded-xl text-lg flex items-center justify-center transition-all"
+                :style="{background: saveIcon===ic ? 'linear-gradient(135deg,#1da462,#0f7b3f)' : 'var(--surface-elevated)', border: saveIcon===ic ? '2px solid #1da462' : '2px solid transparent', transform: saveIcon===ic ? 'scale(1.15)' : 'scale(1)'}"
+                @click="saveIcon=ic">{{ic}}</button>
+            </div>
+          </div>
+          <!-- Name -->
+          <div>
+            <label class="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style="color:var(--text-tertiary)">Report name</label>
+            <div class="flex items-center gap-2 px-3 py-2.5 rounded-xl" style="background:var(--surface-elevated);border:1.5px solid var(--border-subtle)">
+              <span class="text-lg">{{saveIcon}}</span>
+              <input v-model="saveName" class="flex-1 bg-transparent outline-none text-sm font-medium" placeholder="e.g. Q2 Active Projects · Branch LA" @keyup.enter="doSaveReport" autofocus>
+            </div>
+          </div>
+          <!-- Active filters preview -->
+          <div v-if="getFilterLabels(getCurrentFilters()).length">
+            <label class="text-[11px] font-semibold uppercase tracking-wider mb-2 block" style="color:var(--text-tertiary)">Active filters being saved</label>
+            <div class="flex flex-wrap gap-1.5">
+              <span v-for="lbl in getFilterLabels(getCurrentFilters())" :key="lbl" class="px-2 py-0.5 rounded-full text-[10px] font-medium" style="background:color-mix(in srgb,var(--drive-green) 12%,transparent);color:var(--drive-green);border:1px solid color-mix(in srgb,var(--drive-green) 30%,transparent)">{{lbl}}</span>
+            </div>
+          </div>
+          <div v-else class="text-[11px] py-2 rounded-lg px-3" style="background:var(--surface-elevated);color:var(--text-tertiary)">⚠️ No active filters — all projects will be shown when this template is applied.</div>
+          <!-- Columns -->
+          <div>
+            <label class="text-[11px] font-semibold uppercase tracking-wider mb-1 block" style="color:var(--text-tertiary)">Columns</label>
+            <p class="text-[11px]" style="color:var(--text-secondary)">{{selectedColumns.length}} columns will be saved with this template</p>
+          </div>
+        </div>
+        <div class="px-6 py-4 flex justify-end gap-2" style="border-top:1px solid var(--border-subtle)">
+          <button class="btn-icon px-4" style="height:36px;font-size:12px" @click="showSaveModal=false">Cancel</button>
+          <button class="btn-primary" :disabled="!saveName.trim()" @click="doSaveReport" style="height:36px;padding:0 20px;font-size:12px">
+            <Icon name="i-lucide-bookmark-check" class="w-3.5 h-3.5"/>Save Template
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ LOAD REPORTS MODAL ═════════════════════════════════════════════ -->
+    <div v-if="showLoadModal" class="fixed inset-0 z-[55] flex items-end sm:items-center justify-center" style="background:rgba(0,0,0,0.6)" @click.self="showLoadModal=false;deleteConfirmId=null;editingReportId=null">
+      <div class="rounded-2xl shadow-2xl w-full sm:w-[640px] max-h-[85vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+        <!-- Header -->
+        <div class="px-6 py-5 flex items-center justify-between shrink-0" style="background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(109,40,217,0.05));border-bottom:1px solid var(--border-subtle)">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl flex items-center justify-center text-lg" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)">🗂️</div>
+            <div>
+              <h2 class="text-sm font-bold">Saved Report Templates</h2>
+              <p class="text-[11px]" style="color:var(--text-tertiary)">{{savedReports.length}} template{{savedReports.length===1?'':'s'}} saved for {{session.name || 'you'}}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="btn-primary" style="background:linear-gradient(135deg,#1da462,#0f7b3f);height:32px;font-size:12px" @click="showLoadModal=false;openSaveModal()">
+              <Icon name="i-lucide-bookmark-plus" class="w-3.5 h-3.5"/>Save Current
+            </button>
+            <button class="btn-icon" style="width:28px;height:28px" @click="showLoadModal=false;deleteConfirmId=null;editingReportId=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
+          </div>
+        </div>
+        <!-- Search -->
+        <div class="px-5 py-3 shrink-0" style="border-bottom:1px solid var(--border-subtle)">
+          <div class="relative">
+            <Icon name="i-lucide-search" class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color:var(--text-tertiary)"/>
+            <input v-model="savedReportSearch" class="input-base w-full" style="height:34px;font-size:12px;padding-left:32px" placeholder="Search saved reports...">
+          </div>
+        </div>
+        <!-- List -->
+        <div class="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+          <!-- Empty state -->
+          <div v-if="savedReports.length === 0" class="flex flex-col items-center justify-center py-16 gap-3">
+            <div class="text-5xl">📭</div>
+            <p class="text-sm font-semibold" style="color:var(--text-secondary)">No saved reports yet</p>
+            <p class="text-[11px]" style="color:var(--text-tertiary)">Set your filters and click "Save" to create your first template</p>
+            <button class="btn-primary mt-2" @click="showLoadModal=false;openSaveModal()"><Icon name="i-lucide-bookmark-plus" class="w-3.5 h-3.5"/>Save Current Filters</button>
+          </div>
+          <!-- No search results -->
+          <div v-else-if="filteredSavedReports.length === 0" class="text-center py-10 text-[12px]" style="color:var(--text-tertiary)">No templates match "{{savedReportSearch}}"</div>
+          <!-- Report cards -->
+          <div v-for="report in filteredSavedReports" :key="report.id"
+            class="rounded-xl p-4 transition-all group"
+            :style="{background: activeReportId===report.id ? 'color-mix(in srgb,var(--drive-green) 8%,var(--surface-elevated))' : 'var(--surface-elevated)', border: activeReportId===report.id ? '1.5px solid var(--drive-green)' : '1.5px solid var(--border-subtle)'}">
+            <div class="flex items-start gap-3">
+              <!-- Icon + active badge -->
+              <div class="relative shrink-0">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style="background:var(--surface-card)">{{report.icon}}</div>
+                <div v-if="activeReportId===report.id" class="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center" style="background:var(--drive-green)">
+                  <Icon name="i-lucide-check" class="w-2.5 h-2.5 text-white"/>
+                </div>
+              </div>
+              <!-- Content -->
+              <div class="flex-1 min-w-0">
+                <!-- Name row (with inline edit) -->
+                <div class="flex items-center gap-2 mb-1">
+                  <template v-if="editingReportId===report.id">
+                    <input v-model="editingName" class="input-base flex-1 text-sm font-bold" style="height:28px;font-size:13px" @keyup.enter="confirmEditName(report)" @keyup.escape="editingReportId=null" autofocus>
+                    <button class="btn-icon" style="width:26px;height:26px" @click="confirmEditName(report)"><Icon name="i-lucide-check" class="w-3.5 h-3.5" style="color:var(--drive-green)"/></button>
+                    <button class="btn-icon" style="width:26px;height:26px" @click="editingReportId=null"><Icon name="i-lucide-x" class="w-3 h-3"/></button>
+                  </template>
+                  <template v-else>
+                    <span class="text-sm font-bold truncate">{{report.name}}</span>
+                    <button class="btn-icon opacity-0 group-hover:opacity-100 transition-opacity" style="width:22px;height:22px" @click.stop="startEditName(report)"><Icon name="i-lucide-pencil" class="w-3 h-3"/></button>
+                  </template>
+                </div>
+                <!-- Filter chips -->
+                <div class="flex flex-wrap gap-1 mb-2">
+                  <span v-for="lbl in getFilterLabels(report.filters).slice(0,5)" :key="lbl" class="px-1.5 py-0.5 rounded text-[9px] font-medium" style="background:color-mix(in srgb,#8b5cf6 12%,transparent);color:#a78bfa;border:1px solid color-mix(in srgb,#8b5cf6 25%,transparent)">{{lbl}}</span>
+                  <span v-if="getFilterLabels(report.filters).length > 5" class="px-1.5 py-0.5 rounded text-[9px] font-medium" style="background:var(--surface-card);color:var(--text-tertiary)">+{{getFilterLabels(report.filters).length - 5}} more</span>
+                  <span v-if="!getFilterLabels(report.filters).length" class="text-[9px]" style="color:var(--text-tertiary)">No filters (all projects)</span>
+                </div>
+                <!-- Meta row -->
+                <div class="flex items-center gap-3 text-[10px]" style="color:var(--text-tertiary)">
+                  <span v-if="report.selectedColKeys?.length"><Icon name="i-lucide-columns" class="w-3 h-3 inline mr-0.5"/>{{report.selectedColKeys.length}} cols</span>
+                  <span>Saved {{new Date(report.createdAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}}</span>
+                </div>
+              </div>
+              <!-- Actions -->
+              <div class="flex items-center gap-1 shrink-0">
+                <template v-if="deleteConfirmId===report.id">
+                  <span class="text-[10px] mr-1" style="color:#ef4444">Delete?</span>
+                  <button class="btn-icon" style="width:26px;height:26px;background:#ef4444" @click="doDeleteReport(report.id)"><Icon name="i-lucide-check" class="w-3 h-3 text-white"/></button>
+                  <button class="btn-icon" style="width:26px;height:26px" @click="deleteConfirmId=null"><Icon name="i-lucide-x" class="w-3 h-3"/></button>
+                </template>
+                <template v-else>
+                  <button class="btn-icon" style="width:26px;height:26px" title="Delete" @click="deleteConfirmId=report.id"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5" style="color:#ef4444"/></button>
+                  <button
+                    class="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                    :style="activeReportId===report.id ? 'background:var(--drive-green);color:#fff' : 'background:linear-gradient(135deg,#1da462,#0f7b3f);color:#fff'"
+                    @click="applyReport(report)">
+                    {{activeReportId===report.id ? '✓ Active' : 'Apply'}}
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
