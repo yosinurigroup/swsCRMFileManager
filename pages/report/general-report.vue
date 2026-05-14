@@ -800,12 +800,12 @@ onMounted(() => {
         <table v-else class="w-full text-sm" style="border-collapse:collapse">
           <thead class="sticky top-0 z-10">
             <tr style="background:var(--surface-card)">
-              <th v-for="col in selectedColumns" :key="col.key" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" :style="{borderBottom:'1px solid var(--border-subtle)',color:'var(--text-secondary)',minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">{{col.label}}</th>
+              <th v-for="col in columns" :key="col.key" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" :style="{borderBottom:'1px solid var(--border-subtle)',color:'var(--text-secondary)',minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">{{col.label}}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in filtered" :key="p['Project ID']||i" class="transition-colors" style="border-bottom:1px solid var(--border-subtle)" :style="{'background': i%2===0 ? 'transparent' : 'var(--surface-card)'}">
-              <td v-for="col in selectedColumns" :key="col.key" class="px-2 py-1.5 text-xs" :class="(col as any).isNotes ? '' : 'whitespace-nowrap'" :style="{color: cellValue(p, col) === '—' ? 'var(--text-tertiary)' : col.chip ? undefined : 'var(--text-secondary)', minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">
+              <td v-for="col in columns" :key="col.key" class="px-2 py-1.5 text-xs" :class="(col as any).isNotes ? '' : 'whitespace-nowrap'" :style="{color: cellValue(p, col) === '—' ? 'var(--text-tertiary)' : col.chip ? undefined : 'var(--text-secondary)', minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">
                 <span v-if="col.chip && p[col.key]" class="status-chip" :class="chipClass(p[col.key], col.chip)">{{p[col.key]}}</span>
                 <template v-else-if="(col as any).isNotes">
                   <div v-if="getNotesForProject(p['Project ID'])" class="max-h-[160px] overflow-y-auto text-[10px]">
@@ -821,17 +821,17 @@ onMounted(() => {
             </tr>
             <!-- Load more row -->
             <tr v-if="loadingMore">
-              <td :colspan="selectedColumns.length" class="text-center py-4">
+              <td :colspan="columns.length" class="text-center py-4">
                 <Icon name="i-lucide-loader-2" class="w-5 h-5 animate-spin mx-auto" style="color:var(--drive-green)"/>
               </td>
             </tr>
             <tr v-if="hasMore && !loadingMore && filtered.length > 0">
-              <td :colspan="selectedColumns.length" class="text-center py-3">
+              <td :colspan="columns.length" class="text-center py-3">
                 <span class="text-[11px]" style="color:var(--text-tertiary)">Showing {{filtered.length}} of {{totalCount.toLocaleString()}} — scroll for more</span>
               </td>
             </tr>
             <tr v-if="filtered.length===0 && !loading">
-              <td :colspan="selectedColumns.length" class="text-center py-16" style="color:var(--text-tertiary)">
+              <td :colspan="columns.length" class="text-center py-16" style="color:var(--text-tertiary)">
                 <Icon name="i-lucide-inbox" class="w-10 h-10 mx-auto mb-2"/>
                 <p>No projects match your filters</p>
               </td>
