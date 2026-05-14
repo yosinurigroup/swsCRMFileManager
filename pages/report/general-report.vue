@@ -175,6 +175,7 @@ async function fetchProjects() {
     projects.value = r.projects || []
     totalCount.value = r.total || 0
     hasMore.value = projects.value.length < totalCount.value
+    await fetchNotes()
   } catch (e) { console.error(e) } finally { loading.value = false }
 }
 
@@ -189,6 +190,12 @@ async function loadMore() {
     const newRows = r.projects || []
     projects.value = [...projects.value, ...newRows]
     hasMore.value = projects.value.length < totalCount.value
+    // Fetch notes for new rows
+    const newIds = newRows.map((p: any) => p['Project ID']).filter(Boolean)
+    if (newIds.length) {
+      const nr = await $fetch<any>('/api/bq/notes', { params: { projectIds: newIds.join(',') } })
+      notes.value = [...notes.value, ...(nr.notes || [])]
+    }
   } catch (e) { console.error(e) } finally { loadingMore.value = false }
 }
 
@@ -377,43 +384,85 @@ const columns = [
   { key: 'AHJ', label: 'AHJ' },
   { key: 'Last Activity Date', label: 'Last Activity Date', date: true },
   { key: 'ntp', label: 'NTP' },
+  { key: '__notes__', label: 'Project Notes', isNotes: true },
 ]
 
 const COL_COUNT = columns.length
 
 function cellValue(p: any, col: typeof columns[0]): string {
+  if ((col as any).isNotes) return getNotesForProject(p['Project ID'] || '')
   let raw = p[col.key]
   if (raw == null || raw === '') return '—'
-  // BigQuery returns dates/timestamps as { value: '...' } objects — unwrap them
-  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
-    raw = raw.value
-  }
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) raw = raw.value
   if (raw == null || raw === '') return '—'
   if (col.date) return fmtDate(raw) || '—'
   if (col.resolve === 'email') return resolveName(String(raw))
   if (col.resolve === 'salesRep') return resolveSalesRep(String(raw))
   if (col.resolve === 'vendor') return resolveVendor(String(raw))
-  // Auto-detect date-like strings that weren't marked as date columns
-  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
-    const d = fmtDate(raw)
-    if (d) return d
-  }
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) { const d = fmtDate(raw); if (d) return d }
   return String(raw)
 }
 
-function downloadCSV() {
+// ── Column Chooser ──────────────────────────────────────────────────────────
+const LS_KEY = 'gr_selected_cols_v1'
+const MAX_COLS = 15
+const showColChooser = ref(false)
+const pendingCols = ref<string[]>([])
+
+function loadSavedCols(): string[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (raw) {
+      const arr = JSON.parse(raw) as string[]
+      const valid = arr.filter(k => columns.some(c => c.key === k)).slice(0, MAX_COLS)
+      if (valid.length) return valid
+    }
+  } catch {}
+  // Default: first 15 columns
+  return columns.slice(0, MAX_COLS).map(c => c.key)
+}
+
+const selectedColKeys = ref<string[]>(loadSavedCols())
+
+const selectedColumns = computed(() =>
+  selectedColKeys.value.map(k => columns.find(c => c.key === k)).filter(Boolean) as typeof columns
+)
+
+function openColChooser() {
+  pendingCols.value = [...selectedColKeys.value]
+  showColChooser.value = true
+}
+
+function togglePendingCol(key: string) {
+  const idx = pendingCols.value.indexOf(key)
+  if (idx >= 0) {
+    pendingCols.value = pendingCols.value.filter(k => k !== key)
+  } else {
+    if (pendingCols.value.length >= MAX_COLS) return
+    pendingCols.value = [...pendingCols.value, key]
+  }
+}
+
+function applyColsAndDownloadCSV() {
+  selectedColKeys.value = [...pendingCols.value]
+  localStorage.setItem(LS_KEY, JSON.stringify(selectedColKeys.value))
+  showColChooser.value = false
+  doDownloadCSV()
+}
+
+function doDownloadCSV() {
+  const cols = selectedColumns.value
   const rows = filtered.value
-  const headers = columns.map(c => c.label)
+  const headers = cols.map(c => c.label)
   const csvRows = [headers.join(',')]
   for (const p of rows) {
-    const vals = columns.map(c => {
+    const vals = cols.map(c => {
       let v = cellValue(p, c)
-      if (v === '\u2014') v = ''  // Replace em-dash placeholder with empty for CSV
+      if (v === '—') v = ''
       return `"${v.replace(/"/g, '""')}"`
     })
     csvRows.push(vals.join(','))
   }
-  // Add UTF-8 BOM so Excel reads encoding correctly
   const BOM = '\uFEFF'
   const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -422,6 +471,61 @@ function downloadCSV() {
   a.download = `general-report-${new Date().toISOString().slice(0,10)}.csv`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// ── PDF Preview ──────────────────────────────────────────────────────────────
+const showPdfPreview = ref(false)
+const pdfPreviewHtml = ref('')
+const pendingPdfCols = ref<string[]>([])
+const showPdfColChooser = ref(false)
+
+function openPdfColChooser() {
+  pendingPdfCols.value = [...selectedColKeys.value]
+  showPdfColChooser.value = true
+}
+
+function togglePendingPdfCol(key: string) {
+  const idx = pendingPdfCols.value.indexOf(key)
+  if (idx >= 0) {
+    pendingPdfCols.value = pendingPdfCols.value.filter(k => k !== key)
+  } else {
+    if (pendingPdfCols.value.length >= MAX_COLS) return
+    pendingPdfCols.value = [...pendingPdfCols.value, key]
+  }
+}
+
+function applyPdfColsAndPreview() {
+  selectedColKeys.value = [...pendingPdfCols.value]
+  localStorage.setItem(LS_KEY, JSON.stringify(selectedColKeys.value))
+  showPdfColChooser.value = false
+  buildPdfPreview()
+}
+
+function esc(s: string) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+function buildPdfPreview() {
+  const cols = selectedColumns.value
+  const rows = filtered.value
+  const today = new Date()
+  const reportDate = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}-${today.getFullYear()}`
+  const ths = cols.map(c => `<th>${esc(c.label)}</th>`).join('')
+  const trs = rows.map((p: any) => {
+    const tds = cols.map(c => {
+      if ((c as any).isNotes) {
+        const n = getNotesForProject(p['Project ID'] || '')
+        return `<td class="notes-cell">${n ? `<div class="nc">${esc(n).replace(/\n/g,'<br>')}</div>` : ''}</td>`
+      }
+      return `<td>${esc(cellValue(p, c))}</td>`
+    }).join('')
+    return `<tr>${tds}</tr>`
+  }).join('')
+  pdfPreviewHtml.value = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>General Report</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px 40px;color:#111;font-size:11px}h1{font-size:18px;font-weight:700;margin-bottom:4px}.rd{font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#f4f6f8;font-weight:600;font-size:10px;text-align:left;padding:6px 8px;border:1px solid #d0d5dd;white-space:nowrap}td{padding:5px 8px;border:1px solid #d0d5dd;font-size:10px;vertical-align:top}tr:nth-child(even){background:#fafbfc}.notes-cell{max-width:220px}.nc{font-size:9px;line-height:1.4;color:#333;white-space:pre-line}@media print{body{padding:20px}@page{size:landscape;margin:12mm}}</style></head><body><h1>General Report${session.value.name ? ' — ' + esc(session.value.name) : ''}</h1><p class="rd">Report Date: ${reportDate} &bull; Total: ${rows.length} projects</p><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></body></html>`
+  showPdfPreview.value = true
+}
+
+function printPdf() {
+  const w = window.open('', '_blank')
+  if (w) { w.document.write(pdfPreviewHtml.value); w.document.close(); setTimeout(() => w.print(), 400) }
 }
 
 // Filter config
@@ -548,7 +652,8 @@ onMounted(() => {
       </div>
       <div class="flex items-center gap-2">
         <span class="text-xs font-medium" style="color:var(--text-tertiary)">{{totalCount.toLocaleString()}} projects</span>
-        <button class="btn-primary" @click="downloadCSV"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
+        <button class="btn-primary" @click="openColChooser"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
+        <button class="btn-primary" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" @click="openPdfColChooser"><Icon name="i-lucide-file-text" class="w-3.5 h-3.5"/>Preview / PDF</button>
         <button class="btn-icon" style="width:32px;height:32px;border-radius:8px" title="Toggle theme" @click="toggleTheme">
           <Icon :name="colorMode.value === 'dark' ? 'i-lucide-sun' : 'i-lucide-moon'" class="w-4 h-4"/>
         </button>
@@ -695,29 +800,38 @@ onMounted(() => {
         <table v-else class="w-full text-sm" style="border-collapse:collapse">
           <thead class="sticky top-0 z-10">
             <tr style="background:var(--surface-card)">
-              <th v-for="col in columns" :key="col.key" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" :style="{borderBottom:'1px solid var(--border-subtle)',color:'var(--text-secondary)',minWidth: col.minW || 'auto'}">{{col.label}}</th>
+              <th v-for="col in selectedColumns" :key="col.key" class="text-left text-[11px] font-semibold px-2 py-2 whitespace-nowrap" :style="{borderBottom:'1px solid var(--border-subtle)',color:'var(--text-secondary)',minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">{{col.label}}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(p, i) in filtered" :key="p['Project ID']||i" class="transition-colors" style="border-bottom:1px solid var(--border-subtle)" :style="{'background': i%2===0 ? 'transparent' : 'var(--surface-card)'}">
-              <td v-for="col in columns" :key="col.key" class="px-2 py-1.5 text-xs whitespace-nowrap" :style="{color: cellValue(p, col) === '—' ? 'var(--text-tertiary)' : col.chip ? undefined : 'var(--text-secondary)', minWidth: col.minW || 'auto'}">
+              <td v-for="col in selectedColumns" :key="col.key" class="px-2 py-1.5 text-xs" :class="(col as any).isNotes ? '' : 'whitespace-nowrap'" :style="{color: cellValue(p, col) === '—' ? 'var(--text-tertiary)' : col.chip ? undefined : 'var(--text-secondary)', minWidth: (col as any).isNotes ? '260px' : col.minW || 'auto'}">
                 <span v-if="col.chip && p[col.key]" class="status-chip" :class="chipClass(p[col.key], col.chip)">{{p[col.key]}}</span>
+                <template v-else-if="(col as any).isNotes">
+                  <div v-if="getNotesForProject(p['Project ID'])" class="max-h-[160px] overflow-y-auto text-[10px]">
+                    <template v-for="(line, li) in getNotesForProject(p['Project ID']).split('\n')" :key="li">
+                      <div class="py-0.5 leading-relaxed">{{ line }}</div>
+                      <div v-if="li < getNotesForProject(p['Project ID']).split('\n').length - 1" style="border-bottom:1px solid var(--border-subtle);margin:1px 0"/>
+                    </template>
+                  </div>
+                  <span v-else style="color:var(--text-tertiary)">—</span>
+                </template>
                 <span v-else>{{cellValue(p, col)}}</span>
               </td>
             </tr>
             <!-- Load more row -->
             <tr v-if="loadingMore">
-              <td :colspan="COL_COUNT" class="text-center py-4">
+              <td :colspan="selectedColumns.length" class="text-center py-4">
                 <Icon name="i-lucide-loader-2" class="w-5 h-5 animate-spin mx-auto" style="color:var(--drive-green)"/>
               </td>
             </tr>
             <tr v-if="hasMore && !loadingMore && filtered.length > 0">
-              <td :colspan="COL_COUNT" class="text-center py-3">
+              <td :colspan="selectedColumns.length" class="text-center py-3">
                 <span class="text-[11px]" style="color:var(--text-tertiary)">Showing {{filtered.length}} of {{totalCount.toLocaleString()}} — scroll for more</span>
               </td>
             </tr>
             <tr v-if="filtered.length===0 && !loading">
-              <td :colspan="COL_COUNT" class="text-center py-16" style="color:var(--text-tertiary)">
+              <td :colspan="selectedColumns.length" class="text-center py-16" style="color:var(--text-tertiary)">
                 <Icon name="i-lucide-inbox" class="w-10 h-10 mx-auto mb-2"/>
                 <p>No projects match your filters</p>
               </td>
@@ -725,6 +839,90 @@ onMounted(() => {
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- ── Column Chooser Modal (CSV) ─────────────────────────────────── -->
+    <div v-if="showColChooser" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.55)" @click.self="showColChooser=false">
+      <div class="rounded-xl shadow-2xl w-[560px] max-h-[80vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+        <div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid var(--border-subtle)">
+          <div>
+            <h2 class="text-sm font-bold">Choose Columns to Download</h2>
+            <p class="text-[11px]" style="color:var(--text-tertiary)">Select up to {{MAX_COLS}} columns. Your selection will be saved.</p>
+          </div>
+          <button class="btn-icon" style="width:28px;height:28px" @click="showColChooser=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
+        </div>
+        <div class="px-4 py-3 flex-1 overflow-y-auto">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-[11px] font-semibold" style="color:var(--text-secondary)">{{pendingCols.length}} / {{MAX_COLS}} selected</span>
+            <button class="text-[11px]" style="color:var(--drive-green)" @click="pendingCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset to default</button>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button
+              v-for="col in columns" :key="col.key"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-left transition-colors"
+              :style="{background: pendingCols.includes(col.key) ? 'color-mix(in srgb,var(--drive-green) 15%,transparent)' : 'var(--surface-elevated)', border: pendingCols.includes(col.key) ? '1px solid var(--drive-green)' : '1px solid var(--border-subtle)', opacity: (!pendingCols.includes(col.key) && pendingCols.length >= MAX_COLS) ? '0.45' : '1', cursor: (!pendingCols.includes(col.key) && pendingCols.length >= MAX_COLS) ? 'not-allowed' : 'pointer'}"
+              @click="togglePendingCol(col.key)"
+            >
+              <Icon :name="pendingCols.includes(col.key) ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: pendingCols.includes(col.key) ? 'var(--drive-green)' : 'var(--text-tertiary)'}"/>
+              <span class="truncate">{{col.label}}</span>
+            </button>
+          </div>
+        </div>
+        <div class="px-5 py-3 flex justify-end gap-2" style="border-top:1px solid var(--border-subtle)">
+          <button class="btn-icon px-4" style="height:34px;font-size:12px" @click="showColChooser=false">Cancel</button>
+          <button class="btn-primary" :disabled="pendingCols.length === 0" @click="applyColsAndDownloadCSV"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Column Chooser Modal (PDF) ─────────────────────────────────── -->
+    <div v-if="showPdfColChooser" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.55)" @click.self="showPdfColChooser=false">
+      <div class="rounded-xl shadow-2xl w-[560px] max-h-[80vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+        <div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid var(--border-subtle)">
+          <div>
+            <h2 class="text-sm font-bold">Choose Columns for PDF</h2>
+            <p class="text-[11px]" style="color:var(--text-tertiary)">Select up to {{MAX_COLS}} columns for your PDF report.</p>
+          </div>
+          <button class="btn-icon" style="width:28px;height:28px" @click="showPdfColChooser=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
+        </div>
+        <div class="px-4 py-3 flex-1 overflow-y-auto">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-[11px] font-semibold" style="color:var(--text-secondary)">{{pendingPdfCols.length}} / {{MAX_COLS}} selected</span>
+            <button class="text-[11px]" style="color:#2563eb" @click="pendingPdfCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset to default</button>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button
+              v-for="col in columns" :key="col.key"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-left transition-colors"
+              :style="{background: pendingPdfCols.includes(col.key) ? 'color-mix(in srgb,#2563eb 15%,transparent)' : 'var(--surface-elevated)', border: pendingPdfCols.includes(col.key) ? '1px solid #2563eb' : '1px solid var(--border-subtle)', opacity: (!pendingPdfCols.includes(col.key) && pendingPdfCols.length >= MAX_COLS) ? '0.45' : '1', cursor: (!pendingPdfCols.includes(col.key) && pendingPdfCols.length >= MAX_COLS) ? 'not-allowed' : 'pointer'}"
+              @click="togglePendingPdfCol(col.key)"
+            >
+              <Icon :name="pendingPdfCols.includes(col.key) ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: pendingPdfCols.includes(col.key) ? '#2563eb' : 'var(--text-tertiary)'}"/>
+              <span class="truncate">{{col.label}}</span>
+            </button>
+          </div>
+        </div>
+        <div class="px-5 py-3 flex justify-end gap-2" style="border-top:1px solid var(--border-subtle)">
+          <button class="btn-icon px-4" style="height:34px;font-size:12px" @click="showPdfColChooser=false">Cancel</button>
+          <button class="btn-primary" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" :disabled="pendingPdfCols.length === 0" @click="applyPdfColsAndPreview"><Icon name="i-lucide-eye" class="w-3.5 h-3.5"/>Preview Report</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PDF Preview Modal ──────────────────────────────────────────── -->
+    <div v-if="showPdfPreview" class="fixed inset-0 z-50 flex flex-col" style="background:rgba(0,0,0,0.75)">
+      <div class="flex items-center justify-between px-5 py-3 shrink-0" style="background:var(--surface-card);border-bottom:1px solid var(--border-subtle)">
+        <div class="flex items-center gap-3">
+          <Icon name="i-lucide-file-text" class="w-5 h-5" style="color:#2563eb"/>
+          <span class="text-sm font-bold">PDF Preview</span>
+          <span class="text-[11px]" style="color:var(--text-tertiary)">{{filtered.length}} rows · {{selectedColumns.length}} columns</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="btn-primary" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" @click="printPdf"><Icon name="i-lucide-printer" class="w-3.5 h-3.5"/>Print / Save PDF</button>
+          <button class="btn-icon" style="width:32px;height:32px" @click="showPdfPreview=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
+        </div>
+      </div>
+      <iframe class="flex-1 w-full" :srcdoc="pdfPreviewHtml" style="background:#fff"/>
     </div>
   </div>
 </template>
