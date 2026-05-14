@@ -456,6 +456,33 @@ function togglePendingCol(key: string) {
   }
 }
 
+const downloadLoading = ref(false)
+
+async function fetchAllRows(): Promise<any[]> {
+  const allRows: any[] = []
+  const params = buildParams()
+  let offset = 0
+  const BATCH = 500
+  while (true) {
+    params.limit = String(BATCH)
+    params.offset = String(offset)
+    const r = await $fetch<any>('/api/bq/general-projects', { params })
+    const batch = r.projects || []
+    allRows.push(...batch)
+    if (allRows.length >= (r.total || 0) || batch.length < BATCH) break
+    offset += BATCH
+  }
+  // Also fetch notes for all loaded IDs not yet cached
+  const newIds = allRows.map((p: any) => p['Project ID']).filter((id: string) => id && !notesMapCache.value[id])
+  if (newIds.length) {
+    try {
+      const nr = await $fetch<any>('/api/bq/notes', { params: { projectIds: newIds.join(',') } })
+      notes.value = [...notes.value, ...(nr.notes || [])]
+    } catch {}
+  }
+  return allRows
+}
+
 function applyColsAndDownloadCSV() {
   selectedColKeys.value = [...pendingCols.value]
   localStorage.setItem(LS_KEY, JSON.stringify(selectedColKeys.value))
@@ -463,27 +490,30 @@ function applyColsAndDownloadCSV() {
   doDownloadCSV()
 }
 
-function doDownloadCSV() {
-  const cols = selectedColumns.value
-  const rows = filtered.value
-  const headers = cols.map(c => c.label)
-  const csvRows = [headers.join(',')]
-  for (const p of rows) {
-    const vals = cols.map(c => {
-      let v = cellValue(p, c)
-      if (v === '—') v = ''
-      return `"${v.replace(/"/g, '""')}"`
-    })
-    csvRows.push(vals.join(','))
-  }
-  const BOM = '\uFEFF'
-  const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `general-report-${new Date().toISOString().slice(0,10)}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+async function doDownloadCSV() {
+  downloadLoading.value = true
+  try {
+    const cols = selectedColumns.value
+    const rows = await fetchAllRows()
+    const headers = cols.map(c => c.label)
+    const csvRows = [headers.join(',')]
+    for (const p of rows) {
+      const vals = cols.map(c => {
+        let v = cellValue(p, c)
+        if (v === '—') v = ''
+        return `"${v.replace(/"/g, '""')}"`
+      })
+      csvRows.push(vals.join(','))
+    }
+    const BOM = '\uFEFF'
+    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `general-report-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) { console.error(e) } finally { downloadLoading.value = false }
 }
 
 // ── PDF Preview ──────────────────────────────────────────────────────────────
@@ -517,24 +547,27 @@ function applyPdfColsAndPreview() {
 
 function esc(s: string) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 
-function buildPdfPreview() {
-  const cols = selectedColumns.value
-  const rows = filtered.value
-  const today = new Date()
-  const reportDate = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}-${today.getFullYear()}`
-  const ths = cols.map(c => `<th>${esc(c.label)}</th>`).join('')
-  const trs = rows.map((p: any) => {
-    const tds = cols.map(c => {
-      if ((c as any).isNotes) {
-        const n = getNotesForProject(p['Project ID'] || '')
-        return `<td class="notes-cell">${n ? `<div class="nc">${esc(n).replace(/\n/g,'<br>')}</div>` : ''}</td>`
-      }
-      return `<td>${esc(cellValue(p, c))}</td>`
+async function buildPdfPreview() {
+  downloadLoading.value = true
+  try {
+    const cols = selectedColumns.value
+    const rows = await fetchAllRows()
+    const today = new Date()
+    const reportDate = `${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}-${today.getFullYear()}`
+    const ths = cols.map(c => `<th>${esc(c.label)}</th>`).join('')
+    const trs = rows.map((p: any) => {
+      const tds = cols.map(c => {
+        if ((c as any).isNotes) {
+          const n = getNotesForProject(p['Project ID'] || '')
+          return `<td class="notes-cell">${n ? `<div class="nc">${esc(n).replace(/\n/g,'<br>')}</div>` : ''}</td>`
+        }
+        return `<td>${esc(cellValue(p, c))}</td>`
+      }).join('')
+      return `<tr>${tds}</tr>`
     }).join('')
-    return `<tr>${tds}</tr>`
-  }).join('')
-  pdfPreviewHtml.value = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>General Report</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px 40px;color:#111;font-size:11px}h1{font-size:18px;font-weight:700;margin-bottom:4px}.rd{font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#f4f6f8;font-weight:600;font-size:10px;text-align:left;padding:6px 8px;border:1px solid #d0d5dd;white-space:nowrap}td{padding:5px 8px;border:1px solid #d0d5dd;font-size:10px;vertical-align:top}tr:nth-child(even){background:#fafbfc}.notes-cell{max-width:220px}.nc{font-size:9px;line-height:1.4;color:#333;white-space:pre-line}@media print{body{padding:20px}@page{size:landscape;margin:12mm}}</style></head><body><h1>General Report${session.value.name ? ' — ' + esc(session.value.name) : ''}</h1><p class="rd">Report Date: ${reportDate} &bull; Total: ${rows.length} projects</p><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></body></html>`
-  showPdfPreview.value = true
+    pdfPreviewHtml.value = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>General Report</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;padding:30px 40px;color:#111;font-size:11px}h1{font-size:18px;font-weight:700;margin-bottom:4px}.rd{font-size:11px;margin-bottom:16px}table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#f4f6f8;font-weight:600;font-size:10px;text-align:left;padding:6px 8px;border:1px solid #d0d5dd;white-space:nowrap}td{padding:5px 8px;border:1px solid #d0d5dd;font-size:10px;vertical-align:top}tr:nth-child(even){background:#fafbfc}.notes-cell{max-width:220px}.nc{font-size:9px;line-height:1.4;color:#333;white-space:pre-line}@media print{body{padding:20px}@page{size:landscape;margin:12mm}}</style></head><body><h1>General Report${session.value.name ? ' — ' + esc(session.value.name) : ''}</h1><p class="rd">Report Date: ${reportDate} &bull; Total: ${rows.length} projects</p><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></body></html>`
+    showPdfPreview.value = true
+  } catch (e) { console.error(e) } finally { downloadLoading.value = false }
 }
 
 function printPdf() {
@@ -852,6 +885,17 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- ── Download Loading Overlay ──────────────────────────────────── -->
+    <div v-if="downloadLoading" class="fixed inset-0 z-[60] flex items-center justify-center" style="background:rgba(0,0,0,0.65)">
+      <div class="rounded-2xl px-10 py-8 flex flex-col items-center gap-4 shadow-2xl" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+        <Icon name="i-lucide-loader-2" class="w-10 h-10 animate-spin" style="color:var(--drive-green)"/>
+        <div class="text-center">
+          <p class="text-sm font-bold">Fetching all records…</p>
+          <p class="text-[11px] mt-1" style="color:var(--text-tertiary)">This may take a few seconds for large datasets</p>
+        </div>
       </div>
     </div>
 
