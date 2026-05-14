@@ -373,9 +373,9 @@ const columns = [
   { key: 'Fire Department Inspector Phone', label: 'Fire Dept Inspector Phone' },
   { key: 'Fire Inspection', label: 'Fire Inspection' },
   { key: 'Existing System', label: 'Existing System' },
-  { key: 'Trench Fill Date', label: 'Trench Fill' },
+  { key: 'Trench Fill Date', label: 'Trench Fill', date: true },
   { key: 'Stucco', label: 'Stucco Status' },
-  { key: 'Trench Fill Date', label: 'Trench Fill Status' },
+  { key: 'Trench Fill Status', label: 'Trench Fill Status' },
   { key: 'Combiner Box', label: 'Combiner Box' },
   { key: 'Service', label: 'Service' },
   { key: 'WR#', label: 'WR#' },
@@ -408,6 +408,18 @@ const LS_KEY = 'gr_selected_cols_v1'
 const MAX_COLS = 15
 const showColChooser = ref(false)
 const pendingCols = ref<string[]>([])
+const colSearch = ref('')
+const pdfColSearch = ref('')
+
+const filteredChooserCols = computed(() => {
+  const q = colSearch.value.toLowerCase().trim()
+  return q ? columns.filter(c => c.label.toLowerCase().includes(q)) : columns
+})
+
+const filteredPdfChooserCols = computed(() => {
+  const q = pdfColSearch.value.toLowerCase().trim()
+  return q ? columns.filter(c => c.label.toLowerCase().includes(q)) : columns
+})
 
 function loadSavedCols(): string[] {
   try {
@@ -430,6 +442,7 @@ const selectedColumns = computed(() =>
 
 function openColChooser() {
   pendingCols.value = [...selectedColKeys.value]
+  colSearch.value = ''
   showColChooser.value = true
 }
 
@@ -481,6 +494,7 @@ const showPdfColChooser = ref(false)
 
 function openPdfColChooser() {
   pendingPdfCols.value = [...selectedColKeys.value]
+  pdfColSearch.value = ''
   showPdfColChooser.value = true
 }
 
@@ -843,7 +857,7 @@ onMounted(() => {
 
     <!-- ── Column Chooser Modal (CSV) ─────────────────────────────────── -->
     <div v-if="showColChooser" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.55)" @click.self="showColChooser=false">
-      <div class="rounded-xl shadow-2xl w-[560px] max-h-[80vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+      <div class="rounded-xl shadow-2xl w-[580px] max-h-[85vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
         <div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid var(--border-subtle)">
           <div>
             <h2 class="text-sm font-bold">Choose Columns to Download</h2>
@@ -851,14 +865,19 @@ onMounted(() => {
           </div>
           <button class="btn-icon" style="width:28px;height:28px" @click="showColChooser=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
         </div>
-        <div class="px-4 py-3 flex-1 overflow-y-auto">
-          <div class="mb-2 flex items-center justify-between">
-            <span class="text-[11px] font-semibold" style="color:var(--text-secondary)">{{pendingCols.length}} / {{MAX_COLS}} selected</span>
-            <button class="text-[11px]" style="color:var(--drive-green)" @click="pendingCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset to default</button>
+        <!-- Search + stats bar -->
+        <div class="px-4 pt-3 pb-2 flex items-center gap-3" style="border-bottom:1px solid var(--border-subtle)">
+          <div class="relative flex-1">
+            <Icon name="i-lucide-search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color:var(--text-tertiary)"/>
+            <input v-model="colSearch" class="input-base w-full" style="height:32px;font-size:12px;padding-left:30px" placeholder="Search columns..." @click.stop>
           </div>
+          <span class="text-[11px] font-semibold shrink-0" style="color:var(--text-secondary)">{{pendingCols.length}} / {{MAX_COLS}}</span>
+          <button class="text-[11px] shrink-0" style="color:var(--drive-green)" @click="pendingCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset</button>
+        </div>
+        <div class="px-4 py-3 flex-1 overflow-y-auto">
           <div class="grid grid-cols-2 gap-1.5">
             <button
-              v-for="col in columns" :key="col.key"
+              v-for="col in filteredChooserCols" :key="col.key + col.label"
               class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-left transition-colors"
               :style="{background: pendingCols.includes(col.key) ? 'color-mix(in srgb,var(--drive-green) 15%,transparent)' : 'var(--surface-elevated)', border: pendingCols.includes(col.key) ? '1px solid var(--drive-green)' : '1px solid var(--border-subtle)', opacity: (!pendingCols.includes(col.key) && pendingCols.length >= MAX_COLS) ? '0.45' : '1', cursor: (!pendingCols.includes(col.key) && pendingCols.length >= MAX_COLS) ? 'not-allowed' : 'pointer'}"
               @click="togglePendingCol(col.key)"
@@ -866,6 +885,7 @@ onMounted(() => {
               <Icon :name="pendingCols.includes(col.key) ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: pendingCols.includes(col.key) ? 'var(--drive-green)' : 'var(--text-tertiary)'}"/>
               <span class="truncate">{{col.label}}</span>
             </button>
+            <p v-if="filteredChooserCols.length === 0" class="col-span-2 text-center py-6 text-xs" style="color:var(--text-tertiary)">No columns match "{{colSearch}}"</p>
           </div>
         </div>
         <div class="px-5 py-3 flex justify-end gap-2" style="border-top:1px solid var(--border-subtle)">
@@ -877,7 +897,7 @@ onMounted(() => {
 
     <!-- ── Column Chooser Modal (PDF) ─────────────────────────────────── -->
     <div v-if="showPdfColChooser" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.55)" @click.self="showPdfColChooser=false">
-      <div class="rounded-xl shadow-2xl w-[560px] max-h-[80vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
+      <div class="rounded-xl shadow-2xl w-[580px] max-h-[85vh] flex flex-col" style="background:var(--surface-card);border:1px solid var(--border-subtle)">
         <div class="flex items-center justify-between px-5 py-4" style="border-bottom:1px solid var(--border-subtle)">
           <div>
             <h2 class="text-sm font-bold">Choose Columns for PDF</h2>
@@ -885,14 +905,19 @@ onMounted(() => {
           </div>
           <button class="btn-icon" style="width:28px;height:28px" @click="showPdfColChooser=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
         </div>
-        <div class="px-4 py-3 flex-1 overflow-y-auto">
-          <div class="mb-2 flex items-center justify-between">
-            <span class="text-[11px] font-semibold" style="color:var(--text-secondary)">{{pendingPdfCols.length}} / {{MAX_COLS}} selected</span>
-            <button class="text-[11px]" style="color:#2563eb" @click="pendingPdfCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset to default</button>
+        <!-- Search + stats bar -->
+        <div class="px-4 pt-3 pb-2 flex items-center gap-3" style="border-bottom:1px solid var(--border-subtle)">
+          <div class="relative flex-1">
+            <Icon name="i-lucide-search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color:var(--text-tertiary)"/>
+            <input v-model="pdfColSearch" class="input-base w-full" style="height:32px;font-size:12px;padding-left:30px" placeholder="Search columns..." @click.stop>
           </div>
+          <span class="text-[11px] font-semibold shrink-0" style="color:var(--text-secondary)">{{pendingPdfCols.length}} / {{MAX_COLS}}</span>
+          <button class="text-[11px] shrink-0" style="color:#2563eb" @click="pendingPdfCols = columns.slice(0,MAX_COLS).map(c=>c.key)">Reset</button>
+        </div>
+        <div class="px-4 py-3 flex-1 overflow-y-auto">
           <div class="grid grid-cols-2 gap-1.5">
             <button
-              v-for="col in columns" :key="col.key"
+              v-for="col in filteredPdfChooserCols" :key="col.key + col.label"
               class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-left transition-colors"
               :style="{background: pendingPdfCols.includes(col.key) ? 'color-mix(in srgb,#2563eb 15%,transparent)' : 'var(--surface-elevated)', border: pendingPdfCols.includes(col.key) ? '1px solid #2563eb' : '1px solid var(--border-subtle)', opacity: (!pendingPdfCols.includes(col.key) && pendingPdfCols.length >= MAX_COLS) ? '0.45' : '1', cursor: (!pendingPdfCols.includes(col.key) && pendingPdfCols.length >= MAX_COLS) ? 'not-allowed' : 'pointer'}"
               @click="togglePendingPdfCol(col.key)"
@@ -900,6 +925,7 @@ onMounted(() => {
               <Icon :name="pendingPdfCols.includes(col.key) ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: pendingPdfCols.includes(col.key) ? '#2563eb' : 'var(--text-tertiary)'}"/>
               <span class="truncate">{{col.label}}</span>
             </button>
+            <p v-if="filteredPdfChooserCols.length === 0" class="col-span-2 text-center py-6 text-xs" style="color:var(--text-tertiary)">No columns match "{{pdfColSearch}}"</p>
           </div>
         </div>
         <div class="px-5 py-3 flex justify-end gap-2" style="border-top:1px solid var(--border-subtle)">
