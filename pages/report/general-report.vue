@@ -846,12 +846,7 @@ const activeReport = computed(() => savedReports.value.find((r: any) => r.id ===
           <span>{{activeReport.name}}</span>
           <button @click="activeReportId=null" style="opacity:0.6"><Icon name="i-lucide-x" class="w-3 h-3"/></button>
         </div>
-        <!-- Save report -->
-        <button class="btn-icon flex items-center gap-1.5 px-3" style="height:32px;font-size:12px;font-weight:600" title="Save current report" @click="openSaveModal">
-          <Icon name="i-lucide-bookmark-plus" class="w-3.5 h-3.5" style="color:var(--drive-green)"/>
-          <span class="hidden sm:inline" style="color:var(--text-primary)">Save</span>
-        </button>
-        <!-- Saved reports -->
+        <!-- Reports (save + load) -->
         <button class="btn-icon flex items-center gap-1.5 px-3 relative" style="height:32px;font-size:12px;font-weight:600" title="Saved reports" @click="showLoadModal=true;savedReportSearch=''">
           <Icon name="i-lucide-folder-open" class="w-3.5 h-3.5" style="color:#8b5cf6"/>
           <span class="hidden sm:inline" style="color:var(--text-primary)">Reports</span>

@@ -2,8 +2,7 @@
  * POST /api/bq/saved-reports
  * Body: { userEmail, reportType, id?, name, icon, filters, selectedColKeys? }
  *
- * If `id` exists → UPDATE (upsert); if no `id` → INSERT with generated UUID.
- * Uses BigQuery MERGE for idempotent upsert.
+ * Upserts a saved report template using BigQuery MERGE.
  */
 export default defineEventHandler(async (event) => {
   try {
@@ -15,16 +14,15 @@ export default defineEventHandler(async (event) => {
     const reportType   = (body.reportType || '').trim()
     const name         = (body.name       || '').trim()
     const icon         = (body.icon       || '📊').trim()
-    const filtersJson  = JSON.stringify(body.filters       || {})
+    const filtersJson  = JSON.stringify(body.filters        || {})
     const colKeysJson  = JSON.stringify(body.selectedColKeys || [])
     const id           = body.id || generateId()
-    const now          = new Date().toISOString()
 
     if (!userEmail)  throw createError({ statusCode: 400, statusMessage: 'userEmail is required' })
     if (!reportType) throw createError({ statusCode: 400, statusMessage: 'reportType is required' })
     if (!name)       throw createError({ statusCode: 400, statusMessage: 'name is required' })
 
-    // MERGE: upsert by id + user_email
+    // Use CURRENT_TIMESTAMP() directly in SQL to avoid string→TIMESTAMP type issues
     const sql = `
       MERGE \`${dataset}.SavedReports\` AS target
       USING (
@@ -35,10 +33,7 @@ export default defineEventHandler(async (event) => {
           @name         AS name,
           @icon         AS icon,
           @filtersJson  AS filters_json,
-          @colKeysJson  AS col_keys_json,
-          FALSE         AS is_deleted,
-          @now          AS created_at,
-          @now          AS updated_at
+          @colKeysJson  AS col_keys_json
       ) AS source
       ON target.id = source.id AND target.user_email = source.user_email
 
@@ -49,16 +44,20 @@ export default defineEventHandler(async (event) => {
           filters_json  = source.filters_json,
           col_keys_json = source.col_keys_json,
           is_deleted    = FALSE,
-          updated_at    = source.updated_at
+          updated_at    = CURRENT_TIMESTAMP()
 
       WHEN NOT MATCHED THEN
         INSERT (id, user_email, report_type, name, icon, filters_json, col_keys_json, is_deleted, created_at, updated_at)
-        VALUES (source.id, source.user_email, source.report_type, source.name, source.icon, source.filters_json, source.col_keys_json, FALSE, source.created_at, source.updated_at)
+        VALUES (
+          source.id, source.user_email, source.report_type,
+          source.name, source.icon, source.filters_json, source.col_keys_json,
+          FALSE, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP()
+        )
     `
 
     await bq.query({
       query: sql,
-      params: { id, userEmail, reportType, name, icon, filtersJson, colKeysJson, now },
+      params: { id, userEmail, reportType, name, icon, filtersJson, colKeysJson },
     })
 
     return { success: true, id }
