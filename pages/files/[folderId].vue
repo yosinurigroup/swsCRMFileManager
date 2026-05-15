@@ -684,6 +684,7 @@ function showToast(msg: string) {
               </div>
               <!-- Hover action overlay -->
               <div class="absolute inset-0 flex items-end justify-center pb-2 gap-1 opacity-0 group-hover:opacity-100 transition-all duration-150" style="background:linear-gradient(to top,rgba(0,0,0,0.6) 0%,transparent 60%)">
+                <button v-if="!dm.isFolder(f)" class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(29,164,98,0.7)" title="Open in Drive" @click.stop="dm.openExternal(f)"><Icon name="i-lucide-external-link" class="w-3.5 h-3.5 text-white"/></button>
                 <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5 text-white"/></button>
                 <button v-if="!dm.isFolder(f)" class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Download" @click.stop="dm.downloadFile(f)"><Icon name="i-lucide-download" class="w-3.5 h-3.5 text-white"/></button>
                 <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(239,68,68,0.7)" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5 text-white"/></button>
