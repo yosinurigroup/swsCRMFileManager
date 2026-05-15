@@ -447,33 +447,25 @@ function showToast(msg: string) {
   <div class="flex flex-1 min-h-0 overflow-hidden">
     <!-- FILE LIST -->
     <div class="flex flex-col min-h-0 overflow-hidden transition-all duration-300" :style="{width: dm.selected.value?'50%':'100%', minWidth: dm.selected.value?'50%':'0', borderRight: dm.selected.value?'1px solid var(--border-subtle)':'none'}">
-      <!-- Column header (list view only) -->
-      <div v-if="viewMode==='list'" class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
+      <!-- Column header + view toggle (always visible) -->
+      <div class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
         <div class="w-5 shrink-0"></div>
         <div class="w-10 shrink-0"></div>
-        <span class="flex-1">Name</span>
-        <span v-if="!dm.selected.value" class="w-16 text-right">Size</span>
-        <span v-if="!dm.selected.value" class="w-24 text-right">Modified</span>
-        <div class="flex items-center gap-1 shrink-0" style="width:148px">
-          <!-- View toggle -->
-          <div class="flex items-center rounded-lg overflow-hidden ml-auto" style="border:1px solid var(--border-subtle);background:var(--surface-elevated)">
-            <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='list'?'var(--drive-green)':'transparent',color:viewMode==='list'?'#fff':'var(--text-tertiary)'}" title="List view" @click="setView('list')">
-              <Icon name="i-lucide-list" class="w-3 h-3"/>List
-            </button>
-            <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='gallery'?'var(--drive-green)':'transparent',color:viewMode==='gallery'?'#fff':'var(--text-tertiary)'}" title="Gallery view" @click="setView('gallery')">
-              <Icon name="i-lucide-layout-grid" class="w-3 h-3"/>Gallery
-            </button>
-          </div>
-        </div>
-      </div>
-      <!-- Gallery toolbar (when gallery view active) -->
-      <div v-if="viewMode==='gallery'" class="flex items-center gap-3 px-5 py-2 shrink-0" style="border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
-        <span class="text-xs font-medium flex-1" style="color:var(--text-tertiary)">{{dm.folderCount.value}} folders, {{dm.fileCount.value}} files</span>
-        <div class="flex items-center rounded-lg overflow-hidden" style="border:1px solid var(--border-subtle);background:var(--surface-elevated)">
-          <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='list'?'var(--drive-green)':'transparent',color:viewMode==='list'?'#fff':'var(--text-tertiary)'}" @click="setView('list')">
+        <span class="flex-1">{{ viewMode === 'list' ? 'Name' : `${dm.folderCount.value} folders, ${dm.fileCount.value} files` }}</span>
+        <span v-if="viewMode === 'list' && !dm.selected.value" class="w-16 text-right">Size</span>
+        <span v-if="viewMode === 'list' && !dm.selected.value" class="w-24 text-right">Modified</span>
+        <!-- List / Gallery toggle -->
+        <div class="flex items-center rounded-lg overflow-hidden" :class="viewMode==='list' ? 'ml-auto' : ''" style="border:1px solid var(--border-subtle);background:var(--surface-elevated)">
+          <button
+            class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all"
+            :style="viewMode === 'list' ? {background:'var(--drive-green)',color:'#fff'} : {background:'transparent',color:'var(--text-tertiary)'}"
+            title="List view" @click="setView('list')">
             <Icon name="i-lucide-list" class="w-3 h-3"/>List
           </button>
-          <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='gallery'?'var(--drive-green)':'transparent',color:viewMode==='gallery'?'#fff':'var(--text-tertiary)'}" @click="setView('gallery')">
+          <button
+            class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all"
+            :style="viewMode === 'gallery' ? {background:'var(--drive-green)',color:'#fff'} : {background:'transparent',color:'var(--text-tertiary)'}"
+            title="Gallery view" @click="setView('gallery')">
             <Icon name="i-lucide-layout-grid" class="w-3 h-3"/>Gallery
           </button>
         </div>
