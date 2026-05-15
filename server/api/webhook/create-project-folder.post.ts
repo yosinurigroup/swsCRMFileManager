@@ -22,12 +22,12 @@ export default defineEventHandler(async (event) => {
   console.log('[webhook:create-project-folder] Query:', JSON.stringify(query))
   console.log('[webhook:create-project-folder] Resolved params:', JSON.stringify(params))
 
-  const customerFolder = params.customerFolder
+  const rawCustomerFolder = params.customerFolder
   const folderName = params.folderName
   const projectId = params.projectId
 
   // ── Validate required fields ────────────────────────────────────────────
-  if (!customerFolder) {
+  if (!rawCustomerFolder) {
     throw createError({ statusCode: 400, statusMessage: 'customerFolder is required. Received params: ' + JSON.stringify(params) })
   }
   if (!folderName) {
@@ -37,12 +37,23 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'projectId is required. Received params: ' + JSON.stringify(params) })
   }
 
+  // ── Parse customerFolder: AppSheet sends link columns as JSON ───────────
+  // Format: {"Url":"https://drive.google.com/...","LinkText":"..."} or plain URL
+  const customerFolderUrl = extractUrlFromAppSheetLink(rawCustomerFolder)
+
+  if (!customerFolderUrl) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Customer folder URL is empty. The customer may not have a folder assigned yet. Raw value: ' + rawCustomerFolder,
+    })
+  }
+
   // ── Extract the folder ID from the Google Drive URL ─────────────────────
-  const parentFolderId = extractFolderId(customerFolder)
+  const parentFolderId = extractFolderId(customerFolderUrl)
   if (!parentFolderId) {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Could not extract folder ID from customerFolder URL. Expected a Google Drive folder URL.',
+      statusMessage: 'Could not extract folder ID from customerFolder URL: ' + customerFolderUrl,
     })
   }
 
@@ -146,3 +157,26 @@ function extractFolderId(input: string): string | null {
   const match = input.match(/\/folders\/([^/?&#]+)/)
   return match?.[1] || null
 }
+
+/**
+ * Extract the URL from an AppSheet link-type column value.
+ * AppSheet sends link columns as JSON: {"Url":"https://...","LinkText":"..."}
+ * Also handles plain URL strings.
+ */
+function extractUrlFromAppSheetLink(value: string): string | null {
+  if (!value) return null
+
+  // Try to parse as AppSheet link JSON: {"Url":"...","LinkText":"..."}
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object' && typeof parsed.Url === 'string') {
+      return parsed.Url.trim() || null
+    }
+  } catch {
+    // Not JSON — treat as plain URL string
+  }
+
+  // Already a plain URL or folder ID
+  return value.trim() || null
+}
+
