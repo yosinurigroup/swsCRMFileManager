@@ -44,6 +44,19 @@ const showNewFolder = ref(false)
 const newFolderName = ref('')
 const newFolderLoading = ref(false)
 
+// Create Google Doc/Sheet/Slides state
+const showCreateGdoc = ref(false)
+const createGdocType = ref<'sheet'|'doc'|'slides'>('sheet')
+const createGdocName = ref('')
+const createGdocLoading = ref(false)
+const showCreateDropdown = ref(false)
+
+const GDOC_TYPES = [
+  { type: 'sheet'  as const, label: 'Google Sheet',        icon: 'i-lucide-table',        color: '#10b981', bg: 'rgba(16,185,129,0.12)' },
+  { type: 'doc'    as const, label: 'Google Doc',          icon: 'i-lucide-file-text',    color: '#3b82f6', bg: 'rgba(59,130,246,0.12)' },
+  { type: 'slides' as const, label: 'Google Slides',       icon: 'i-lucide-presentation', color: '#f97316', bg: 'rgba(249,115,22,0.12)'  },
+]
+
 // Multi-select state
 const selectedIds = ref<Set<string>>(new Set())
 const isSelectMode = computed(() => selectedIds.value.size > 0)
@@ -124,6 +137,37 @@ async function confirmRename() {
   try { await dm.renameFile(renamingFile.value.id, renameValue.value.trim()); renamingFile.value = null }
   catch {} finally { renameLoading.value = false }
 }
+
+// Create Google Workspace file
+async function confirmCreateGdoc() {
+  if (!createGdocName.value.trim() || createGdocLoading.value) return
+  createGdocLoading.value = true
+  try {
+    const r = await $fetch<{success:boolean,file:any,webViewLink:string}>('/api/drive/create-gdoc', {
+      method: 'POST',
+      body: { parentId: dm.currentFolderId.value, name: createGdocName.value.trim(), type: createGdocType.value },
+    })
+    showCreateGdoc.value = false
+    createGdocName.value = ''
+    showToast(`"${r.file.name}" created`)
+    await dm.fetchFiles(dm.currentFolderId.value!)
+    // Open in new tab immediately
+    if (r.webViewLink) window.open(r.webViewLink, '_blank')
+  } catch { showToast('Failed to create file') }
+  finally { createGdocLoading.value = false }
+}
+
+function openCreateGdoc(type: 'sheet'|'doc'|'slides') {
+  createGdocType.value = type
+  createGdocName.value = ''
+  showCreateGdoc.value = true
+  showCreateDropdown.value = false
+}
+
+// Close create dropdown on outside click
+onMounted(() => {
+  document.addEventListener('click', () => { showCreateDropdown.value = false })
+})
 
 // New folder
 async function confirmNewFolder() {
@@ -269,6 +313,27 @@ function showToast(msg: string) {
       <button v-if="dm.folderStack.value.length>0" class="btn-ghost" @click="dm.goBack()"><Icon name="i-lucide-arrow-left" class="w-3.5 h-3.5"/>Back</button>
       <button class="btn-icon" @click="dm.fetchFiles(dm.currentFolderId.value!)"><Icon name="i-lucide-refresh-cw" class="w-4 h-4" :class="{'animate-spin':dm.loading.value}"/></button>
       <button class="btn-ghost" @click="showNewFolder=true"><Icon name="i-lucide-folder-plus" class="w-3.5 h-3.5"/>New Folder</button>
+      <!-- Create Google Doc/Sheet/Slides dropdown -->
+      <div class="relative" @click.stop>
+        <button class="btn-ghost" @click="showCreateDropdown=!showCreateDropdown">
+          <Icon name="i-lucide-plus" class="w-3.5 h-3.5"/>
+          New
+          <Icon name="i-lucide-chevron-down" class="w-3 h-3 ml-0.5" :style="{transform: showCreateDropdown ? 'rotate(180deg)' : '', transition:'transform 0.15s'}"/>
+        </button>
+        <Transition enter-active-class="transition-all duration-150" enter-from-class="opacity-0 scale-95 -translate-y-1" enter-to-class="opacity-100 scale-100 translate-y-0" leave-active-class="transition-all duration-100" leave-from-class="opacity-100" leave-to-class="opacity-0 scale-95 -translate-y-1">
+          <div v-if="showCreateDropdown" class="absolute right-0 top-full mt-1 rounded-xl overflow-hidden z-50" style="min-width:190px;background:var(--surface-card);border:1px solid var(--border-subtle);box-shadow:0 8px 24px rgba(0,0,0,0.35)">
+            <button v-for="gt in GDOC_TYPES" :key="gt.type"
+              class="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors"
+              style="color:var(--text-primary)"
+              @click="openCreateGdoc(gt.type)">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" :style="{background:gt.bg}">
+                <Icon :name="gt.icon" class="w-3.5 h-3.5" :style="{color:gt.color}"/>
+              </div>
+              <span class="font-medium text-[13px]">{{gt.label}}</span>
+            </button>
+          </div>
+        </Transition>
+      </div>
       <button class="btn-primary" :disabled="isUploading" @click="fileInputRef?.click()">
         <Icon :name="isUploading?'i-lucide-loader-2':'i-lucide-upload'" class="w-4 h-4" :class="{'animate-spin':isUploading}"/>Upload
       </button>
@@ -460,7 +525,8 @@ function showToast(msg: string) {
           <p class="text-[11px]" style="color:var(--text-tertiary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.formatDate(dm.selected.value.modifiedTime)}}</p>
         </div>
         <button class="btn-ghost" @click="startRename(dm.selected.value)"><Icon name="i-lucide-pencil-line" class="w-3 h-3"/>Rename</button>
-        <button class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
+        <button class="btn-ghost" @click="dm.openExternal(dm.selected.value)"><Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in Drive</button>
+        <button v-if="!dm.isFolder(dm.selected.value) && !dm.isGoogleWorkspace(dm.selected.value)" class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
         <button class="btn-icon" @click="dm.selected.value=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
       </div>
       <div class="relative flex-1 min-h-0 overflow-hidden">
@@ -485,9 +551,43 @@ function showToast(msg: string) {
           <p class="text-sm" style="color:var(--text-secondary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.selected.value.name.split('.').pop()?.toUpperCase()}}</p>
           <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download</button>
         </div>
-        <!-- Google Drive iframe preview (PDF, Office, images, etc.) -->
+        <!-- Google Workspace files (Docs, Sheets, Slides) — open directly in the browser -->
+        <div v-else-if="dm.isGoogleWorkspace(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-5 p-12 text-center">
+          <div class="w-24 h-24 rounded-3xl flex items-center justify-center" :style="{background:dm.fileColor(dm.selected.value)+'18'}">
+            <Icon :name="dm.fileIcon(dm.selected.value)" class="w-12 h-12" :style="{color:dm.fileColor(dm.selected.value)}"/>
+          </div>
+          <div>
+            <p class="font-bold text-base" style="color:var(--text-primary)">{{dm.selected.value.name}}</p>
+            <p class="text-xs mt-1" style="color:var(--text-tertiary)">{{dm.googleWorkspaceLabel(dm.selected.value)}}</p>
+          </div>
+          <div class="flex flex-col gap-2 w-full max-w-[240px]">
+            <button class="btn-primary w-full justify-center" :style="{background:'linear-gradient(135deg,'+dm.fileColor(dm.selected.value)+','+dm.fileColor(dm.selected.value)+'cc)'}" @click="dm.openExternal(dm.selected.value)">
+              <Icon name="i-lucide-external-link" class="w-4 h-4"/>
+              Open in {{dm.googleWorkspaceLabel(dm.selected.value)}}
+            </button>
+            <p class="text-[11px]" style="color:var(--text-tertiary)">Opens in a new tab in your browser</p>
+          </div>
+        </div>
+        <!-- Office files (Excel, Word, PowerPoint) — preview via Google Drive viewer -->
+        <div v-else-if="dm.isOfficeFile(dm.selected.value)" class="relative w-full h-full flex flex-col">
+          <div class="flex items-center gap-2 px-4 py-2 shrink-0" style="background:var(--surface-card);border-bottom:1px solid var(--border-subtle)">
+            <Icon :name="dm.fileIcon(dm.selected.value)" class="w-3.5 h-3.5" :style="{color:dm.fileColor(dm.selected.value)}"/>
+            <span class="text-[11px] font-medium flex-1" style="color:var(--text-secondary)">Previewing via Google Drive Viewer</span>
+            <button class="btn-ghost" style="height:26px;font-size:11px;padding:0 10px" @click="dm.openExternal(dm.selected.value)">
+              <Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in Drive
+            </button>
+          </div>
+          <iframe :key="dm.selected.value.id"
+            :src="dm.previewUrl(dm.selected.value)"
+            class="flex-1 w-full border-0"
+            allow="autoplay; clipboard-read; clipboard-write"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
+        </div>
+        <!-- Google Drive iframe preview (PDF, images, etc.) -->
         <div v-else-if="dm.canPreview(dm.selected.value)" class="relative w-full h-full">
-          <iframe :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0" allow="autoplay" sandbox="allow-scripts allow-same-origin"/>
+          <iframe :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0"
+            allow="autoplay; clipboard-read; clipboard-write"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
           <!-- Cover Google Drive's "open in new tab" icon -->
           <div style="position:absolute;top:0;right:0;width:56px;height:56px;background:var(--surface-elevated);z-index:10;pointer-events:all"></div>
         </div>
@@ -499,6 +599,47 @@ function showToast(msg: string) {
           <p class="font-semibold" style="color:var(--text-primary)">No preview available</p>
           <p class="text-xs" style="color:var(--text-tertiary)">{{dm.selected.value.mimeType}}</p>
           <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download to view</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE GOOGLE DOC/SHEET MODAL -->
+  <div v-if="showCreateGdoc" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.55);backdrop-filter:blur(6px)" @click.self="showCreateGdoc=false">
+    <div class="w-full max-w-sm mx-4 rounded-2xl overflow-hidden" style="background:var(--surface-card);border:1px solid var(--border-subtle);box-shadow:0 20px 60px rgba(0,0,0,0.5)">
+      <!-- Header -->
+      <div class="flex items-center gap-3 px-5 py-4" :style="{background: GDOC_TYPES.find(t=>t.type===createGdocType)?.bg}">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" :style="{background: GDOC_TYPES.find(t=>t.type===createGdocType)?.bg}">
+          <Icon :name="GDOC_TYPES.find(t=>t.type===createGdocType)?.icon||'i-lucide-file'" class="w-5 h-5" :style="{color: GDOC_TYPES.find(t=>t.type===createGdocType)?.color}"/>
+        </div>
+        <div>
+          <p class="text-sm font-bold" style="color:var(--text-primary)">Create {{GDOC_TYPES.find(t=>t.type===createGdocType)?.label}}</p>
+          <p class="text-[11px]" style="color:var(--text-tertiary)">In current folder · Opens in new tab after creation</p>
+        </div>
+      </div>
+      <div class="px-5 py-4 space-y-4">
+        <!-- Type switcher -->
+        <div class="flex gap-1.5">
+          <button v-for="gt in GDOC_TYPES" :key="gt.type"
+            class="flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-[11px] font-semibold transition-all"
+            :style="{background: createGdocType===gt.type ? gt.bg : 'var(--surface-elevated)', border: '1.5px solid '+(createGdocType===gt.type ? gt.color+'60' : 'transparent'), color: createGdocType===gt.type ? gt.color : 'var(--text-tertiary)'}"
+            @click="createGdocType=gt.type">
+            <Icon :name="gt.icon" class="w-4 h-4"/>
+            <span>{{gt.label.replace('Google ','')}}</span>
+          </button>
+        </div>
+        <!-- Name input -->
+        <div>
+          <label class="text-[11px] font-medium block mb-1.5" style="color:var(--text-secondary)">File name</label>
+          <input v-model="createGdocName" class="input-base w-full" style="height:40px" :placeholder="'Untitled '+GDOC_TYPES.find(t=>t.type===createGdocType)?.label.replace('Google ','')" @keydown.enter="confirmCreateGdoc" @keydown.escape="showCreateGdoc=false" autofocus/>
+        </div>
+        <!-- Actions -->
+        <div class="flex gap-2 pt-1">
+          <button class="btn-ghost flex-1 justify-center" @click="showCreateGdoc=false">Cancel</button>
+          <button class="btn-primary flex-1 justify-center" :disabled="!createGdocName.trim()||createGdocLoading" :style="{background: 'linear-gradient(135deg,'+(GDOC_TYPES.find(t=>t.type===createGdocType)?.color||'#1da462')+','+(GDOC_TYPES.find(t=>t.type===createGdocType)?.color||'#1da462')+'cc)'}" @click="confirmCreateGdoc">
+            <Icon :name="createGdocLoading?'i-lucide-loader-2':'i-lucide-plus'" class="w-4 h-4" :class="{'animate-spin':createGdocLoading}"/>
+            Create & Open
+          </button>
         </div>
       </div>
     </div>

@@ -81,6 +81,18 @@ export function useDriveManager(rootId: Ref<string>) {
   function isAudio(f: DriveFile) { return AUDIO_MIMES.includes(f.mimeType) }
   function isVideo(f: DriveFile) { return VIDEO_MIMES.includes(f.mimeType) }
   function isArchive(f: DriveFile) { return ARCHIVE_MIMES.includes(f.mimeType) }
+  function isGoogleWorkspace(f: DriveFile) {
+    return ['application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet','application/vnd.google-apps.presentation'].includes(f.mimeType)
+  }
+  function isOfficeFile(f: DriveFile) {
+    return [...OFFICE_DOC_MIMES, ...OFFICE_SHEET_MIMES, ...OFFICE_PRES_MIMES].includes(f.mimeType)
+  }
+  function googleWorkspaceLabel(f: DriveFile): string {
+    if (f.mimeType === 'application/vnd.google-apps.document') return 'Google Docs'
+    if (f.mimeType === 'application/vnd.google-apps.spreadsheet') return 'Google Sheets'
+    if (f.mimeType === 'application/vnd.google-apps.presentation') return 'Google Slides'
+    return 'Google Drive'
+  }
   function streamUrl(f: DriveFile) { return `/api/drive/stream?fileId=${f.id}` }
 
   function downloadFile(f: DriveFile) {
@@ -185,7 +197,9 @@ export function useDriveManager(rootId: Ref<string>) {
     folderStack, files, loading, error, selected, previewLoaded, rootFolderName,
     currentFolderId, sorted, folderCount, fileCount,
     fetchFiles, openFolder, goBack, goToRoot, goToBreadcrumb, openFile,
-    previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive, downloadFile, openExternal, openInDrive,
+    previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive,
+    isGoogleWorkspace, isOfficeFile, googleWorkspaceLabel,
+    downloadFile, openExternal, openInDrive,
     renameFile, createFolder, moveFile, copyFile, deleteFile, uploadFiles,
     fileIcon, fileColor, formatSize, formatDate
   }
