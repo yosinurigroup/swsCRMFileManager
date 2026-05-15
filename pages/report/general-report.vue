@@ -823,6 +823,26 @@ const filteredSavedReports = computed(() => {
 })
 
 const activeReport = computed(() => savedReports.value.find((r: any) => r.id === activeReportId.value) || null)
+
+// True when at least one non-default filter or search is active
+const hasActiveFilters = computed(() => {
+  return !!(dateFrom.value || dateTo.value || branch.value || vendor.value ||
+    salesRep.value || projectType.value || jobStatus.value || projectStatus.value ||
+    projectManager.value || financeManager.value || engineer.value ||
+    permitCoordinator.value || utility.value || solarEquipment.value ||
+    ssaStatus.value || solarInstallStatus.value || completionStatus.value ||
+    finalStatus.value || search.value)
+})
+
+// True when the exact current filter combination already exists as a saved report
+const isCurrentFilterSaved = computed(() => {
+  if (!hasActiveFilters.value) return false
+  const cur = JSON.stringify(getCurrentFilters())
+  return savedReports.value.some((r: any) => JSON.stringify(r.filters) === cur)
+})
+
+// Show Save button only when filters are active AND not already saved
+const showSaveButton = computed(() => hasActiveFilters.value && !isCurrentFilterSaved.value)
 </script>
 
 <template>
@@ -840,19 +860,6 @@ const activeReport = computed(() => savedReports.value.find((r: any) => r.id ===
       </div>
       <div class="flex items-center gap-2">
         <span class="text-xs font-medium" style="color:var(--text-tertiary)">{{totalCount.toLocaleString()}} projects</span>
-        <!-- Active report indicator -->
-        <div v-if="activeReport" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold" style="background:color-mix(in srgb,var(--drive-green) 15%,transparent);border:1px solid var(--drive-green);color:var(--drive-green)">
-          <span>{{activeReport.icon}}</span>
-          <span>{{activeReport.name}}</span>
-          <button @click="activeReportId=null" style="opacity:0.6"><Icon name="i-lucide-x" class="w-3 h-3"/></button>
-        </div>
-        <!-- Reports (save + load) -->
-        <button class="btn-icon flex items-center gap-1.5 px-3 relative" style="height:32px;font-size:12px;font-weight:600" title="Saved reports" @click="showLoadModal=true;savedReportSearch=''">
-          <Icon name="i-lucide-folder-open" class="w-3.5 h-3.5" style="color:#8b5cf6"/>
-          <span class="hidden sm:inline" style="color:var(--text-primary)">Reports</span>
-          <span v-if="savedReports.length" class="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:#8b5cf6">{{savedReports.length}}</span>
-        </button>
-        <div class="w-px h-5 mx-1" style="background:var(--border-subtle)"/>
         <button class="btn-primary" @click="openColChooser"><Icon name="i-lucide-download" class="w-3.5 h-3.5"/>Download CSV</button>
         <button class="btn-primary" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" @click="openPdfColChooser"><Icon name="i-lucide-file-text" class="w-3.5 h-3.5"/>Preview / PDF</button>
         <button class="btn-icon" style="width:32px;height:32px;border-radius:8px" title="Toggle theme" @click="toggleTheme">
@@ -886,6 +893,35 @@ const activeReport = computed(() => savedReports.value.find((r: any) => r.id ===
           <div class="relative">
             <Icon name="i-lucide-search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style="color:var(--text-tertiary)"/>
             <input v-model="search" class="input-base w-full" style="height:34px;font-size:12px;padding-left:30px" placeholder="Search projects...">
+          </div>
+
+          <!-- ── Reports strip ──────────────────────────────────────── -->
+          <div class="flex gap-2">
+            <!-- Reports button -->
+            <button
+              class="flex-1 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-semibold transition-all relative"
+              style="height:30px;background:color-mix(in srgb,#8b5cf6 12%,var(--surface-elevated));border:1px solid color-mix(in srgb,#8b5cf6 30%,transparent);color:#a78bfa"
+              @click="showLoadModal=true;savedReportSearch=''">
+              <Icon name="i-lucide-folder-open" class="w-3.5 h-3.5"/>
+              <span>Reports</span>
+              <span v-if="savedReports.length" class="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style="background:#8b5cf6">{{savedReports.length}}</span>
+            </button>
+            <!-- Save Current Report — only when filters are active AND not already saved -->
+            <Transition name="sr-fade">
+              <button v-if="showSaveButton"
+                class="flex-1 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                style="height:30px;background:color-mix(in srgb,var(--drive-green) 14%,var(--surface-elevated));border:1px solid color-mix(in srgb,var(--drive-green) 35%,transparent);color:var(--drive-green)"
+                @click="openSaveModal">
+                <Icon name="i-lucide-bookmark-plus" class="w-3.5 h-3.5"/>
+                <span>Save View</span>
+              </button>
+            </Transition>
+          </div>
+          <!-- Active template indicator -->
+          <div v-if="activeReport" class="flex items-center gap-1.5 px-2 py-1 rounded-lg" style="background:color-mix(in srgb,var(--drive-green) 10%,var(--surface-elevated));border:1px solid color-mix(in srgb,var(--drive-green) 25%,transparent)">
+            <span class="text-sm">{{activeReport.icon}}</span>
+            <span class="flex-1 text-[11px] font-semibold truncate" style="color:var(--drive-green)">{{activeReport.name}}</span>
+            <button class="shrink-0" style="opacity:0.6" @click="activeReportId=null"><Icon name="i-lucide-x" class="w-3 h-3" style="color:var(--drive-green)"/></button>
           </div>
 
           <div class="h-px" style="background:var(--border-subtle)"/>
@@ -1306,3 +1342,8 @@ const activeReport = computed(() => savedReports.value.find((r: any) => r.id ===
     </div>
   </div>
 </template>
+
+<style scoped>
+.sr-fade-enter-active, .sr-fade-leave-active { transition: all 0.2s ease; }
+.sr-fade-enter-from, .sr-fade-leave-to { opacity: 0; transform: scale(0.92); }
+</style>
