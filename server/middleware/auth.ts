@@ -8,8 +8,8 @@ export default defineEventHandler((event) => {
   const isProtectedPage = isFilePage || isReportPage
   const isProtectedApi = path.startsWith('/api/drive/') || path.startsWith('/api/bq/')
 
-  // Skip auth routes
-  if (path.startsWith('/api/auth/')) return
+  // Skip auth routes and transfer admin tool
+  if (path.startsWith('/api/auth/') || path.startsWith('/api/transfer/') || path === '/transfer') return
 
   if (!isProtectedPage && !isProtectedApi) return
 

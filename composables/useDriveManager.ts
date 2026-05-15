@@ -33,7 +33,7 @@ export function useDriveManager(rootId: Ref<string>) {
     folderStack.value.length > 0 ? folderStack.value[folderStack.value.length-1]!.id : rootId.value
   )
   // Hide _Archive folder from UI
-  const visibleFiles = computed(() => files.value.filter(f => f.name !== '_Archive'))
+  const visibleFiles = computed(() => files.value.filter(f => f.name !== '_Archive' && f.name !== '_archivedOriginals'))
   const sorted = computed(() => {
     const f = visibleFiles.value.filter(f => f.mimeType === FOLDER_MIME)
     const r = visibleFiles.value.filter(f => f.mimeType !== FOLDER_MIME)
