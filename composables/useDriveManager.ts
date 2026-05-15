@@ -65,11 +65,19 @@ export function useDriveManager(rootId: Ref<string>) {
   function goToRoot() { selected.value = null; folderStack.value = [] }
   function goToBreadcrumb(i: number) { selected.value = null; folderStack.value = folderStack.value.slice(0,i+1) }
 
-  function openFile(f: DriveFile) {
+  async function openFile(f: DriveFile) {
     if (f.mimeType === FOLDER_MIME) { openFolder(f); return }
-    // CSV & XLSX files → open directly in Google Sheets
+    // CSV & XLSX files → convert to Google Sheets via API and open
     if (isSpreadsheetFile(f)) {
-      window.open(`https://drive.google.com/open?id=${f.id}`, '_blank')
+      try {
+        const r = await $fetch<{success:boolean,url:string}>('/api/drive/open-as-sheet', {
+          method: 'POST', body: { fileId: f.id },
+        })
+        if (r.url) window.open(r.url, '_blank')
+      } catch {
+        // Fallback: open in Drive viewer
+        window.open(f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`, '_blank')
+      }
       return
     }
     previewLoaded.value = false; selected.value = f
