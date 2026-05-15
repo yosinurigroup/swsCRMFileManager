@@ -49,8 +49,12 @@ export default defineNuxtConfig({
   },
 
   nitro: {
-    // Increase payload size limit for file uploads
-    // Vercel free tier: 4.5MB; Pro: ~100MB per function invocation
+    // Vercel Pro: 300s function timeout, 100MB body limit
+    vercel: {
+      functions: {
+        maxDuration: 300,
+      },
+    },
     esbuild: {
       options: {
         target: 'es2022',
