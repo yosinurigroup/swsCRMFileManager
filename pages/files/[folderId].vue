@@ -570,7 +570,7 @@ function showToast(msg: string) {
               </div>
               <!-- Select checkbox overlay -->
               <div class="absolute top-2 left-2 w-5 h-5 rounded-md flex items-center justify-center transition-all duration-150"
-                :style="{background: selectedIds.has(f.id)?'#1da462':'rgba(0,0,0,0.35)', border:'1.5px solid '+(selectedIds.has(f.id)?'#1da462':'rgba(255,255,255,0.3)', opacity: selectedIds.has(f.id)?1:0, backdropFilter:'blur(4px)'}}"
+                :style="{background: selectedIds.has(f.id)?'#1da462':'rgba(0,0,0,0.35)', border:'1.5px solid '+(selectedIds.has(f.id)?'#1da462':'rgba(255,255,255,0.3)'), opacity: selectedIds.has(f.id)?1:0, backdropFilter:'blur(4px)'}}"
                 :class="{'opacity-0 group-hover:opacity-100': !selectedIds.has(f.id)}"
                 @click.stop="toggleSelect(f)">
                 <Icon name="i-lucide-check" class="w-3 h-3 text-white"/>
