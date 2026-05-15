@@ -23,7 +23,10 @@ export default defineEventHandler(async (event) => {
       }
       const field = dateFieldMap[query.dateOf]
       if (field) {
-        where += ` AND \`${field}\` >= @dateFrom AND \`${field}\` <= @dateTo`
+        // Explicitly cast both sides to DATE so BigQuery doesn't attempt
+        // implicit string→date coercion (which can silently fail)
+        where += ` AND CAST(\`${field}\` AS DATE)
+                   BETWEEN CAST(@dateFrom AS DATE) AND CAST(@dateTo AS DATE)`
         params.dateFrom = query.dateFrom
         params.dateTo = query.dateTo
       }
