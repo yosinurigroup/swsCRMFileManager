@@ -638,7 +638,8 @@ function showToast(msg: string) {
           <span v-if="!dm.selected.value" class="w-16 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.isFolder(f) ? '—' : dm.formatSize(f.size)}}</span>
           <span v-if="!dm.selected.value" class="w-24 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.formatDate(f.modifiedTime)}}</span>
           <!-- Inline actions -->
-          <div class="flex items-center gap-0.5 shrink-0" style="width:148px;justify-content:flex-end">
+          <div class="flex items-center gap-0.5 shrink-0" style="width:176px;justify-content:flex-end">
+            <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Open in Drive" @click.stop="dm.openExternal(f)"><Icon name="i-lucide-external-link" class="w-3.5 h-3.5" style="color:#1da462"/></button>
             <button class="btn-icon" style="width:28px;height:28px" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5" style="color:#f59e0b"/></button>
             <button class="btn-icon" style="width:28px;height:28px" title="Move" @click.stop="startMove(f)"><Icon name="i-lucide-folder-symlink" class="w-3.5 h-3.5" style="color:#8b5cf6"/></button>
             <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Copy" @click.stop="doCopy(f)"><Icon name="i-lucide-copy" class="w-3.5 h-3.5" style="color:#6b7280"/></button>
