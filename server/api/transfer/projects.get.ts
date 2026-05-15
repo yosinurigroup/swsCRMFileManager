@@ -11,7 +11,7 @@ export default defineEventHandler(async () => {
       \`Project ID\`,
       \`Customer Address\`,
       \`Project Folder\`,
-      \`isTransfered\`
+      \`isTansfered\`
     FROM \`${dataset}.Projects\`
     WHERE (TempDeleted IS NULL OR TempDeleted != true)
       AND \`Project Folder\` IS NOT NULL

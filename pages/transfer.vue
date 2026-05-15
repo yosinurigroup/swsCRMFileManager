@@ -29,7 +29,7 @@ const progressPct = computed(() => {
 
 function extractFolderId(url: string): string | null {
   const m = url?.match(/folders\/([a-zA-Z0-9_-]+)/)
-  return m ? m[1] : null
+  return m?.[1] ?? null
 }
 
 function now() { return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
@@ -42,7 +42,7 @@ async function loadProjects() {
       Project_ID: p.Project_ID || p['Project ID'] || '',
       Customer_Address: p.Customer_Address || p['Customer Address'] || '',
       Project_Folder: p.Project_Folder || p['Project Folder'] || '',
-      isTransfered: p.isTransfered === true || p.isTransfered === 'true',
+      isTransfered: p.isTansfered === true || p.isTansfered === 'true' || p.isTransfered === true || p.isTransfered === 'true',
     }))
   } catch (e: any) { error.value = e.message }
   loading.value = false
@@ -108,9 +108,9 @@ async function startTransfer() {
 
   for (let i = 0; i < pending.length; i++) {
     if (stopped.value) { addLog('🛑', 'Stopped by user'); break }
-    currentIdx.value = i; currentProject.value = pending[i]
-    addLog('━', `━━━ [${i + 1}/${pending.length}] ${pending[i].Customer_Address || pending[i].Project_ID} ━━━`)
-    await processOneProject(pending[i])
+    currentIdx.value = i; currentProject.value = pending[i]!
+    addLog('━', `━━━ [${i + 1}/${pending.length}] ${pending[i]!.Customer_Address || pending[i]!.Project_ID} ━━━`)
+    await processOneProject(pending[i]!)
     sessionProcessed.value = i + 1
   }
   currentProject.value = null; running.value = false
@@ -262,7 +262,7 @@ h1{font-size:1.15rem;font-weight:700;margin:0;color:#f4f4f5}
 .term-dots span:nth-child(1){background:#ef4444}
 .term-dots span:nth-child(2){background:#f59e0b}
 .term-dots span:nth-child(3){background:#22c55e}
-.term-body{max-height:420px;overflow-y:auto;padding:.5rem 0;font-family:'JetBrains Mono','Fira Code',monospace;font-size:.72rem;line-height:1.7}
+.term-body{max-height:550px;overflow-y:auto;padding:.5rem 0;font-family:'JetBrains Mono','Fira Code',monospace;font-size:.72rem;line-height:1.7}
 .term-line{display:flex;align-items:flex-start;padding:0 1rem;gap:.5rem}
 .term-line:hover{background:rgba(255,255,255,.02)}
 .term-sep{margin:.4rem 0;color:#3b82f6!important;font-weight:700}

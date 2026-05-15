@@ -39,7 +39,7 @@ export default defineEventHandler(async (event) => {
       q: `'${parentId}' in parents and name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
       fields: 'files(id)', supportsAllDrives: true,
     })
-    if (e.data.files?.length) return e.data.files[0].id!
+    if (e.data.files?.length) return e.data.files[0]!.id!
     const r = await drive.files.create({
       requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
       fields: 'id', supportsAllDrives: true,
@@ -103,7 +103,7 @@ export default defineEventHandler(async (event) => {
         const bq = useBigQuery()
         const dataset = getDataset()
         await bq.query({
-          query: `UPDATE \`${dataset}.Projects\` SET \`isTransfered\` = true WHERE \`Project ID\` = @pid`,
+          query: `UPDATE \`${dataset}.Projects\` SET \`isTansfered\` = true WHERE \`Project ID\` = @pid`,
           params: { pid: projectId },
         })
       } catch (e: any) {
