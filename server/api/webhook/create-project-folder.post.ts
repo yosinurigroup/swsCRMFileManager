@@ -4,30 +4,41 @@
  * Webhook to create a project folder inside a customer's Google Drive folder
  * and update the BigQuery Projects table with the new folder link.
  *
- * Body: {
- *   customerFolder: string  — Google Drive URL of the parent customer folder
- *   folderName: string      — Name of the new project folder to create
- *   projectId: string       — Project ID to match in BigQuery
- * }
+ * Accepts JSON, form-encoded, or query-string payloads (for AppSheet compatibility).
+ *
+ * Fields: customerFolder, folderName, projectId
  *
  * Returns: { success, folderId, folderUrl }
  */
 export default defineEventHandler(async (event) => {
-  const { customerFolder, folderName, projectId } = await readBody(event)
+  // ── Parse payload from any format AppSheet might send ───────────────────
+  const body = await readBody(event).catch(() => null)
+  const query = getQuery(event)
+
+  // Merge: body can be object, string (form-encoded parsed), or null
+  const params = normalizeParams(body, query)
+
+  console.log('[webhook:create-project-folder] Raw body:', JSON.stringify(body))
+  console.log('[webhook:create-project-folder] Query:', JSON.stringify(query))
+  console.log('[webhook:create-project-folder] Resolved params:', JSON.stringify(params))
+
+  const customerFolder = params.customerFolder
+  const folderName = params.folderName
+  const projectId = params.projectId
 
   // ── Validate required fields ────────────────────────────────────────────
-  if (!customerFolder?.trim()) {
-    throw createError({ statusCode: 400, statusMessage: 'customerFolder is required' })
+  if (!customerFolder) {
+    throw createError({ statusCode: 400, statusMessage: 'customerFolder is required. Received params: ' + JSON.stringify(params) })
   }
-  if (!folderName?.trim()) {
-    throw createError({ statusCode: 400, statusMessage: 'folderName is required' })
+  if (!folderName) {
+    throw createError({ statusCode: 400, statusMessage: 'folderName is required. Received params: ' + JSON.stringify(params) })
   }
-  if (!projectId?.trim()) {
-    throw createError({ statusCode: 400, statusMessage: 'projectId is required' })
+  if (!projectId) {
+    throw createError({ statusCode: 400, statusMessage: 'projectId is required. Received params: ' + JSON.stringify(params) })
   }
 
   // ── Extract the folder ID from the Google Drive URL ─────────────────────
-  const parentFolderId = extractFolderId(customerFolder.trim())
+  const parentFolderId = extractFolderId(customerFolder)
   if (!parentFolderId) {
     throw createError({
       statusCode: 400,
@@ -41,7 +52,7 @@ export default defineEventHandler(async (event) => {
     // ── 1. Create the project folder inside the customer folder ───────────
     const createRes = await drive.files.create({
       requestBody: {
-        name: folderName.trim(),
+        name: folderName,
         mimeType: 'application/vnd.google-apps.folder',
         parents: [parentFolderId],
       },
@@ -61,12 +72,11 @@ export default defineEventHandler(async (event) => {
 
       await bq.query({
         query: `UPDATE \`${dataset}.Projects\` SET \`Project Folder\` = @folderUrl WHERE \`Project ID\` = @pid`,
-        params: { folderUrl, pid: projectId.trim() },
+        params: { folderUrl, pid: projectId },
       })
 
       console.log(`[webhook] Updated BigQuery Projects: Project ID = ${projectId}, Project Folder = ${folderUrl}`)
     } catch (bqErr: any) {
-      // Log BQ error but still return success for the folder creation
       console.error('[webhook] BigQuery update error:', bqErr.message)
       return {
         success: true,
@@ -90,18 +100,49 @@ export default defineEventHandler(async (event) => {
   }
 })
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 /**
- * Extract a Google Drive folder ID from various URL formats:
- *  - https://drive.google.com/drive/folders/FOLDER_ID
- *  - https://drive.google.com/drive/folders/FOLDER_ID?...
- *  - https://drive.google.com/drive/u/0/folders/FOLDER_ID
- *  - Raw folder ID (no URL)
+ * Normalize incoming params from various formats:
+ *  - JSON body (object)
+ *  - Form-encoded body (may come as string or parsed object)
+ *  - Query string params
+ */
+function normalizeParams(body: any, query: any): Record<string, string> {
+  const result: Record<string, string> = {}
+
+  // If body is a string, try JSON parse, then try URL-encoded parse
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body)
+    } catch {
+      // Try URL-encoded: key=value&key2=value2
+      const parsed: Record<string, string> = {}
+      for (const pair of body.split('&')) {
+        const [k, ...v] = pair.split('=')
+        if (k) parsed[decodeURIComponent(k.trim())] = decodeURIComponent(v.join('=').trim())
+      }
+      body = parsed
+    }
+  }
+
+  // Merge body (higher priority) over query
+  if (query && typeof query === 'object') Object.assign(result, query)
+  if (body && typeof body === 'object') Object.assign(result, body)
+
+  // Trim all string values
+  for (const key of Object.keys(result)) {
+    if (typeof result[key] === 'string') result[key] = result[key].trim()
+  }
+
+  return result
+}
+
+/**
+ * Extract a Google Drive folder ID from various URL formats or raw ID.
  */
 function extractFolderId(input: string): string | null {
-  // If it looks like a raw folder ID (no slashes, no dots), return as-is
   if (/^[\w-]{10,}$/.test(input)) return input
-
-  // Try to match the folder ID from URL patterns
   const match = input.match(/\/folders\/([^/?&#]+)/)
   return match?.[1] || null
 }
