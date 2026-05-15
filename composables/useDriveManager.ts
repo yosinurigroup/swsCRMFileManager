@@ -69,7 +69,7 @@ export function useDriveManager(rootId: Ref<string>) {
     if (f.mimeType === FOLDER_MIME) { openFolder(f); return }
     // CSV & XLSX files → open directly in Google Sheets
     if (isSpreadsheetFile(f)) {
-      window.open(`https://docs.google.com/spreadsheets/d/${f.id}`, '_blank')
+      window.open(f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`, '_blank')
       return
     }
     previewLoaded.value = false; selected.value = f
