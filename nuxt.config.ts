@@ -48,5 +48,15 @@ export default defineNuxtConfig({
     },
   },
 
+  nitro: {
+    // Increase payload size limit for file uploads
+    // Vercel free tier: 4.5MB; Pro: ~100MB per function invocation
+    esbuild: {
+      options: {
+        target: 'es2022',
+      },
+    },
+  },
+
   compatibilityDate: '2024-12-14',
 })

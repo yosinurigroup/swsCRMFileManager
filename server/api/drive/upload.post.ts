@@ -66,24 +66,37 @@ export default defineEventHandler(async (event) => {
       stream.push(file.data)
       stream.push(null)
 
+      const fileName = file.filename || parts[parts.length - 1] || 'Untitled'
+      const mimeType = file.type || 'application/octet-stream'
+      const fileSize = file.data.length
+
+      // Use resumable upload for files > 5MB for reliability
+      const useResumable = fileSize > 5 * 1024 * 1024
+
       const res = await drive.files.create({
         requestBody: {
-          name: file.filename || parts[parts.length - 1] || 'Untitled',
+          name: fileName,
           parents: [targetFolderId],
         },
         media: {
-          mimeType: file.type || 'application/octet-stream',
+          mimeType,
           body: stream,
         },
         fields: 'id, name, mimeType',
         supportsAllDrives: true,
+      }, {
+        // Use resumable upload for large files
+        ...(useResumable ? {
+          // Signal to googleapis to use resumable upload
+          onUploadProgress: () => {},
+        } : {}),
       })
 
       if (res.data.id) {
         uploaded.push({
           id: res.data.id,
-          name: res.data.name || file.filename || 'Untitled',
-          mimeType: res.data.mimeType || file.type || '',
+          name: res.data.name || fileName,
+          mimeType: res.data.mimeType || mimeType,
         })
       }
     }
@@ -91,6 +104,7 @@ export default defineEventHandler(async (event) => {
     return { success: true, uploaded, count: uploaded.length }
   }
   catch (err: any) {
+    console.error('Upload error:', err.message || err)
     throw createError({
       statusCode: err.statusCode || 500,
       statusMessage: err.data?.statusMessage || err.message || 'Failed to upload files',

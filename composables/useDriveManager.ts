@@ -71,7 +71,7 @@ export function useDriveManager(rootId: Ref<string>) {
     if (isSpreadsheetFile(f)) {
       try {
         const r = await $fetch<{success:boolean,url:string}>('/api/drive/open-as-sheet', {
-          method: 'POST', body: { fileId: f.id },
+          method: 'POST', body: { fileId: f.id, rootFolderId: rootId.value },
         })
         if (r.url) window.open(r.url, '_blank')
       } catch {

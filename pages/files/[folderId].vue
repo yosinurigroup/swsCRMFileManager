@@ -100,32 +100,131 @@ function onFileInput(e: Event) {
   if(input.files?.length) doUpload(Array.from(input.files), [])
   input.value = ''
 }
+
+// Threshold: files larger than this use chunked resumable upload
+const RESUMABLE_THRESHOLD = 4 * 1024 * 1024 // 4MB (Vercel free tier limit is ~4.5MB)
+const CHUNK_SIZE = 3.5 * 1024 * 1024 // 3.5MB chunks — must fit within Vercel's 4.5MB body limit with overhead
+
+/**
+ * Upload a small file through the server endpoint (< 4MB)
+ */
+async function uploadSmallFile(file: File, folderId: string, relativePath: string): Promise<boolean> {
+  const fd = new FormData()
+  fd.append('folderId', folderId)
+  fd.append('files', file)
+  fd.append('relativePaths', JSON.stringify([relativePath]))
+  try {
+    await $fetch('/api/drive/upload', { method: 'POST', body: fd })
+    return true
+  } catch (err: any) {
+    const errMsg = err?.data?.statusMessage || err?.message || 'Upload failed'
+    console.error(`Upload failed for ${file.name}:`, errMsg)
+    showToast(`Failed: ${file.name}`)
+    return false
+  }
+}
+
+/**
+ * Upload a large file using chunked resumable upload through our server proxy.
+ * 1. Server creates a resumable session URL on Google Drive
+ * 2. Client sends chunks to our server proxy, which forwards them to Google
+ * This avoids both Vercel body limits and CORS issues.
+ */
+async function uploadLargeFile(file: File, folderId: string): Promise<boolean> {
+  try {
+    // Step 1: Get resumable upload session from our server
+    const session = await $fetch<{success:boolean, uploadUri:string, accessToken:string}>('/api/drive/upload-session', {
+      method: 'POST',
+      body: { folderId, fileName: file.name, mimeType: file.type || 'application/octet-stream', fileSize: file.size },
+    })
+
+    if (!session.uploadUri) {
+      showToast(`Failed: ${file.name} — no upload session`)
+      return false
+    }
+
+    // Step 2: Upload chunks through our server proxy
+    const totalSize = file.size
+    let offset = 0
+
+    while (offset < totalSize) {
+      const end = Math.min(offset + CHUNK_SIZE, totalSize)
+      const chunk = file.slice(offset, end)
+      const chunkArrayBuffer = await chunk.arrayBuffer()
+
+      try {
+        // Send chunk to our server proxy which forwards to Google Drive
+        const params = new URLSearchParams({
+          uploadUri: session.uploadUri,
+          start: String(offset),
+          end: String(end),
+          total: String(totalSize),
+          mimeType: file.type || 'application/octet-stream',
+        })
+
+        const res = await fetch(`/api/drive/upload-chunk?${params.toString()}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: chunkArrayBuffer,
+        })
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ statusMessage: res.statusText }))
+          console.error(`Chunk upload failed for ${file.name}:`, errData)
+          showToast(`Failed: ${file.name}`)
+          return false
+        }
+      } catch (err: any) {
+        console.error(`Chunk upload error for ${file.name}:`, err)
+        showToast(`Failed: ${file.name}`)
+        return false
+      }
+
+      offset = end
+      // Update progress within this file
+      const filePct = Math.round((offset / totalSize) * 100)
+      uploadCurrentName.value = `${file.name} (${filePct}%)`
+    }
+
+    return true
+  } catch (err: any) {
+    console.error(`Resumable upload failed for ${file.name}:`, err)
+    showToast(`Failed: ${file.name}`)
+    return false
+  }
+}
+
+async function uploadSingleFile(file: File, folderId: string, relativePath: string): Promise<boolean> {
+  if (file.size > RESUMABLE_THRESHOLD) {
+    return uploadLargeFile(file, folderId)
+  }
+  return uploadSmallFile(file, folderId, relativePath)
+}
+
 async function doUpload(files: File[], paths: string[]) {
   isUploading.value = true
   uploadTotal.value = files.length
   uploadCurrent.value = 0
   uploadProgress.value = 0
-  try {
-    // Upload files one by one for progress tracking
-    const folderId = dm.currentFolderId.value
-    if (!folderId) return
-    for (let i = 0; i < files.length; i++) {
-      uploadCurrent.value = i + 1
-      uploadCurrentName.value = files[i]!.name
-      uploadProgress.value = Math.round(((i) / files.length) * 100)
-      const fd = new FormData()
-      fd.append('folderId', folderId)
-      fd.append('files', files[i]!)
-      fd.append('relativePaths', JSON.stringify([paths[i] || files[i]!.name]))
-      await $fetch('/api/drive/upload', { method: 'POST', body: fd })
-    }
-    uploadProgress.value = 100
-    await dm.fetchFiles(folderId)
-    showToast(`${files.length} file${files.length > 1 ? 's' : ''} uploaded`)
-  } catch {}
-  finally {
-    setTimeout(() => { isUploading.value = false; uploadProgress.value = 0 }, 600)
+  let successCount = 0
+  let failCount = 0
+  const folderId = dm.currentFolderId.value
+  if (!folderId) { isUploading.value = false; return }
+  for (let i = 0; i < files.length; i++) {
+    uploadCurrent.value = i + 1
+    uploadCurrentName.value = files[i]!.name
+    uploadProgress.value = Math.round(((i) / files.length) * 100)
+    const ok = await uploadSingleFile(files[i]!, folderId, paths[i] || files[i]!.name)
+    if (ok) successCount++; else failCount++
   }
+  uploadProgress.value = 100
+  await dm.fetchFiles(folderId)
+  if (failCount === 0) {
+    showToast(`${successCount} file${successCount > 1 ? 's' : ''} uploaded`)
+  } else {
+    showToast(`${successCount} uploaded, ${failCount} failed`)
+  }
+  setTimeout(() => { isUploading.value = false; uploadProgress.value = 0 }, 600)
 }
 function onDragEnter(e: DragEvent) { e.preventDefault(); dragCounter++; isDragging.value = true }
 function onDragLeave(e: DragEvent) { e.preventDefault(); dragCounter--; if(dragCounter<=0){isDragging.value=false;dragCounter=0} }
@@ -320,7 +419,6 @@ function showToast(msg: string) {
     <span class="text-xs font-medium shrink-0 tabular-nums" style="color:var(--text-tertiary)">{{totalSizeFormatted}}</span>
     <!-- Actions -->
     <div class="flex items-center gap-2 shrink-0">
-      <button v-if="dm.folderStack.value.length>0" class="btn-ghost" @click="dm.goBack()"><Icon name="i-lucide-arrow-left" class="w-3.5 h-3.5"/>Back</button>
       <button class="btn-icon" @click="dm.fetchFiles(dm.currentFolderId.value!)"><Icon name="i-lucide-refresh-cw" class="w-4 h-4" :class="{'animate-spin':dm.loading.value}"/></button>
       <button class="btn-ghost" @click="showNewFolder=true"><Icon name="i-lucide-folder-plus" class="w-3.5 h-3.5"/>New Folder</button>
       <!-- Create Google Doc/Sheet/Slides dropdown -->
@@ -449,7 +547,12 @@ function showToast(msg: string) {
     <div class="flex flex-col min-h-0 overflow-hidden transition-all duration-300" :style="{width: dm.selected.value?'50%':'100%', minWidth: dm.selected.value?'50%':'0', borderRight: dm.selected.value?'1px solid var(--border-subtle)':'none'}">
       <!-- Column header + view toggle (always visible) -->
       <div class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
-        <div class="w-5 shrink-0"></div>
+        <!-- Back button (far left) -->
+        <button v-if="dm.folderStack.value.length > 0" class="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold normal-case tracking-normal transition-all shrink-0" style="background:var(--surface-elevated);border:1px solid var(--border-subtle);color:var(--text-secondary)" @click="dm.goBack()" title="Go back">
+          <Icon name="i-lucide-arrow-left" class="w-3 h-3"/>
+          Back
+        </button>
+        <div v-else class="w-5 shrink-0"></div>
         <div class="w-10 shrink-0"></div>
         <span class="flex-1">{{ viewMode === 'list' ? 'Name' : `${dm.folderCount.value} folders, ${dm.fileCount.value} files` }}</span>
         <span v-if="viewMode === 'list' && !dm.selected.value" class="w-16 text-right">Size</span>
