@@ -659,6 +659,16 @@ function showToast(msg: string) {
             <div class="relative flex items-center justify-center overflow-hidden" style="aspect-ratio:1;background:var(--surface-elevated)">
               <!-- Real thumbnail for images -->
               <img v-if="f.thumbnailLink && dm.isImage(f)" :src="f.thumbnailLink" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" :alt="f.name" referrerpolicy="no-referrer"/>
+              <!-- Google Workspace branded card (Sheets, Docs, Slides) -->
+              <div v-else-if="dm.isGoogleWorkspace(f)" class="flex flex-col items-center justify-center gap-1.5 w-full h-full" :style="{background: dm.fileColor(f) + '12'}">
+                <img v-if="f.thumbnailLink" :src="f.thumbnailLink" class="w-full h-full object-cover" :alt="f.name" referrerpolicy="no-referrer" @error="($event.target as HTMLImageElement).style.display='none'"/>
+                <template v-if="!f.thumbnailLink">
+                  <Icon :name="dm.fileIcon(f)" class="w-10 h-10" :style="{color: dm.fileColor(f)}"/>
+                  <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded" :style="{color: dm.fileColor(f), background: dm.fileColor(f) + '18'}">{{ dm.googleWorkspaceLabel(f).replace('Google ','') }}</span>
+                </template>
+              </div>
+              <!-- Thumbnail from Drive for other files that have one -->
+              <img v-else-if="f.thumbnailLink" :src="f.thumbnailLink" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" :alt="f.name" referrerpolicy="no-referrer" @error="($event.target as HTMLImageElement).parentElement!.innerHTML = ''"/>
               <!-- Icon fallback for non-images -->
               <div v-else class="flex flex-col items-center gap-2" :style="{background:dm.fileColor(f)+'10'}" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
                 <Icon :name="dm.fileIcon(f)" class="w-14 h-14 transition-transform duration-200 group-hover:scale-110" :style="{color:dm.fileColor(f)}"/>
