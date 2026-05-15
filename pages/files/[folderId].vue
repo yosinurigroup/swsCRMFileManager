@@ -302,7 +302,7 @@ async function fetchMovePickerFiles(fid: string) {
   movePickerLoading.value = true
   try {
     const d = await $fetch<{success:boolean,files:DriveFile[]}>(`/api/drive/files?folderId=${fid}`)
-    movePickerFiles.value = (d.files||[]).filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.id !== movingFile.value?.id && f.name !== '_Archive')
+    movePickerFiles.value = (d.files||[]).filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.id !== movingFile.value?.id && f.name !== '_Archive' && f.name !== '_ConvertedFiles')
   } catch { movePickerFiles.value = [] }
   finally { movePickerLoading.value = false }
 }

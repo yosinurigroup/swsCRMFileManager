@@ -1,4 +1,5 @@
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
+const CONVERTED_FOLDER_NAME = '_ConvertedFiles'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -9,55 +10,67 @@ export default defineEventHandler(async (event) => {
 
     const drive = useDrive()
 
-    // Get the original file metadata
+    // Get the original file metadata (need parents to know where to place the sheet)
     const meta = await drive.files.get({
       fileId,
       fields: 'name, parents',
       supportsAllDrives: true,
     })
 
-    // Find or create "Converted Files" folder inside the root folder
-    const parentForConverted = rootFolderId || (meta.data.parents?.[0])
-    let convertedFolderId: string | undefined
+    const originalParent = meta.data.parents?.[0]
 
-    if (parentForConverted) {
-      // Search for existing "Converted Files" folder
+    // 1. Create the Google Sheet in the SAME folder as the original CSV
+    const res = await drive.files.copy({
+      fileId,
+      requestBody: {
+        name: meta.data.name?.replace(/\.(csv|xlsx?)$/i, '') || meta.data.name,
+        mimeType: 'application/vnd.google-apps.spreadsheet',
+        parents: originalParent ? [originalParent] : undefined,
+      },
+      fields: 'id, name, mimeType, webViewLink',
+      supportsAllDrives: true,
+    })
+
+    // 2. Find or create _ConvertedFiles folder inside the ROOT folder
+    const convertedParent = rootFolderId || originalParent
+    if (convertedParent) {
+      let convertedFolderId: string | undefined
+
+      // Search for existing _ConvertedFiles folder
       const search = await drive.files.list({
-        q: `name = 'Converted Files' and '${parentForConverted}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
-        fields: 'files(id, name)',
+        q: `name = '${CONVERTED_FOLDER_NAME}' and '${convertedParent}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`,
+        fields: 'files(id)',
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
+        pageSize: 1,
       })
 
       if (search.data.files && search.data.files.length > 0) {
         convertedFolderId = search.data.files[0]!.id!
       } else {
-        // Create "Converted Files" folder
+        // Create _ConvertedFiles folder once
         const folder = await drive.files.create({
           requestBody: {
-            name: 'Converted Files',
+            name: CONVERTED_FOLDER_NAME,
             mimeType: FOLDER_MIME,
-            parents: [parentForConverted],
+            parents: [convertedParent],
           },
           fields: 'id',
           supportsAllDrives: true,
         })
         convertedFolderId = folder.data.id!
       }
-    }
 
-    // Copy the file and convert it to native Google Sheets format
-    // Place in "Converted Files" folder instead of the original folder
-    const res = await drive.files.copy({
-      fileId,
-      requestBody: {
-        name: meta.data.name?.replace(/\.(csv|xlsx?)$/i, '') || meta.data.name,
-        mimeType: 'application/vnd.google-apps.spreadsheet',
-        parents: convertedFolderId ? [convertedFolderId] : (meta.data.parents || undefined),
-      },
-      fields: 'id, name, mimeType, webViewLink',
-      supportsAllDrives: true,
-    })
+      // 3. Move the original CSV into _ConvertedFiles
+      if (convertedFolderId) {
+        await drive.files.update({
+          fileId,
+          addParents: convertedFolderId,
+          removeParents: originalParent || undefined,
+          supportsAllDrives: true,
+        })
+      }
+    }
 
     const sheetUrl = res.data.webViewLink
       || `https://docs.google.com/spreadsheets/d/${res.data.id}/edit`
