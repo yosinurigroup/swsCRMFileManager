@@ -84,6 +84,16 @@ onMounted(() => { if(rootId.value) dm.fetchFiles(rootId.value) })
 
 useHead({ title: 'File Manager — SWS Drive' })
 
+// ── View mode: 'list' | 'gallery' ────────────────────────────────────────────
+const VIEW_KEY = 'sws_fm_view'
+const viewMode = ref<'list'|'gallery'>(
+  (typeof localStorage !== 'undefined' ? localStorage.getItem(VIEW_KEY) : null) as 'list'|'gallery' || 'list'
+)
+function setView(mode: 'list'|'gallery') {
+  viewMode.value = mode
+  if (typeof localStorage !== 'undefined') localStorage.setItem(VIEW_KEY, mode)
+}
+
 // Upload handlers
 function onFileInput(e: Event) {
   const input = e.target as HTMLInputElement
@@ -437,14 +447,36 @@ function showToast(msg: string) {
   <div class="flex flex-1 min-h-0 overflow-hidden">
     <!-- FILE LIST -->
     <div class="flex flex-col min-h-0 overflow-hidden transition-all duration-300" :style="{width: dm.selected.value?'50%':'100%', minWidth: dm.selected.value?'50%':'0', borderRight: dm.selected.value?'1px solid var(--border-subtle)':'none'}">
-      <!-- Column header -->
-      <div class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
+      <!-- Column header (list view only) -->
+      <div v-if="viewMode==='list'" class="flex items-center gap-3 px-5 py-2 shrink-0 text-xs font-medium uppercase tracking-wider" style="color:var(--text-tertiary);border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
         <div class="w-5 shrink-0"></div>
         <div class="w-10 shrink-0"></div>
         <span class="flex-1">Name</span>
         <span v-if="!dm.selected.value" class="w-16 text-right">Size</span>
         <span v-if="!dm.selected.value" class="w-24 text-right">Modified</span>
-        <div class="shrink-0" style="width:148px">Actions</div>
+        <div class="flex items-center gap-1 shrink-0" style="width:148px">
+          <!-- View toggle -->
+          <div class="flex items-center rounded-lg overflow-hidden ml-auto" style="border:1px solid var(--border-subtle);background:var(--surface-elevated)">
+            <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='list'?'var(--drive-green)':'transparent',color:viewMode==='list'?'#fff':'var(--text-tertiary)'}" title="List view" @click="setView('list')">
+              <Icon name="i-lucide-list" class="w-3 h-3"/>List
+            </button>
+            <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='gallery'?'var(--drive-green)':'transparent',color:viewMode==='gallery'?'#fff':'var(--text-tertiary)'}" title="Gallery view" @click="setView('gallery')">
+              <Icon name="i-lucide-layout-grid" class="w-3 h-3"/>Gallery
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- Gallery toolbar (when gallery view active) -->
+      <div v-if="viewMode==='gallery'" class="flex items-center gap-3 px-5 py-2 shrink-0" style="border-bottom:1px solid var(--border-subtle);background:var(--surface-card)">
+        <span class="text-xs font-medium flex-1" style="color:var(--text-tertiary)">{{dm.folderCount.value}} folders, {{dm.fileCount.value}} files</span>
+        <div class="flex items-center rounded-lg overflow-hidden" style="border:1px solid var(--border-subtle);background:var(--surface-elevated)">
+          <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='list'?'var(--drive-green)':'transparent',color:viewMode==='list'?'#fff':'var(--text-tertiary)'}" @click="setView('list')">
+            <Icon name="i-lucide-list" class="w-3 h-3"/>List
+          </button>
+          <button class="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold transition-all" :style="{background:viewMode==='gallery'?'var(--drive-green)':'transparent',color:viewMode==='gallery'?'#fff':'var(--text-tertiary)'}" @click="setView('gallery')">
+            <Icon name="i-lucide-layout-grid" class="w-3 h-3"/>Gallery
+          </button>
+        </div>
       </div>
 
       <!-- Bulk action bar -->
@@ -459,9 +491,16 @@ function showToast(msg: string) {
 
       <!-- Loading -->
       <div v-if="dm.loading.value" class="flex-1 overflow-auto">
-        <div v-for="i in 8" :key="i" class="flex items-center gap-4 px-5 py-3.5" style="border-bottom:1px solid var(--border-subtle)">
-          <div class="w-10 h-10 rounded-xl skeleton shrink-0"></div>
-          <div class="flex-1 space-y-2"><div class="h-3.5 skeleton" :style="{width:`${40+Math.random()*40}%`}"></div><div class="h-2.5 skeleton w-1/4"></div></div>
+        <!-- List skeleton -->
+        <template v-if="viewMode==='list'">
+          <div v-for="i in 8" :key="i" class="flex items-center gap-4 px-5 py-3.5" style="border-bottom:1px solid var(--border-subtle)">
+            <div class="w-10 h-10 rounded-xl skeleton shrink-0"></div>
+            <div class="flex-1 space-y-2"><div class="h-3.5 skeleton" :style="{width:`${40+Math.random()*40}%`}"></div><div class="h-2.5 skeleton w-1/4"></div></div>
+          </div>
+        </template>
+        <!-- Gallery skeleton -->
+        <div v-else class="p-4 grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+          <div v-for="i in 12" :key="i" class="rounded-2xl skeleton" style="aspect-ratio:1"></div>
         </div>
       </div>
 
@@ -480,8 +519,8 @@ function showToast(msg: string) {
         <button class="btn-primary" @click="fileInputRef?.click()"><Icon name="i-lucide-upload" class="w-4 h-4"/>Upload Files</button>
       </div>
 
-      <!-- File rows -->
-      <div v-else class="flex-1 overflow-y-auto">
+      <!-- File rows (LIST view) -->
+      <div v-else-if="viewMode==='list'" class="flex-1 overflow-y-auto">
         <button v-for="f in dm.sorted.value" :key="f.id"
           class="group w-full flex items-center gap-3 px-5 py-3 text-left transition-all duration-150"
           :style="{borderBottom:'1px solid var(--border-subtle)', background: selectedIds.has(f.id)?'rgba(29,164,98,0.08)':dm.selected.value?.id===f.id?'rgba(29,164,98,0.06)':'transparent', borderLeft: selectedIds.has(f.id)?'3px solid #1da462':dm.selected.value?.id===f.id?'3px solid #1da462':'3px solid transparent'}"
@@ -502,7 +541,7 @@ function showToast(msg: string) {
           </div>
           <span v-if="!dm.selected.value" class="w-16 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.isFolder(f) ? '—' : dm.formatSize(f.size)}}</span>
           <span v-if="!dm.selected.value" class="w-24 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.formatDate(f.modifiedTime)}}</span>
-          <!-- Inline actions (always visible, fixed width) -->
+          <!-- Inline actions -->
           <div class="flex items-center gap-0.5 shrink-0" style="width:148px;justify-content:flex-end">
             <button class="btn-icon" style="width:28px;height:28px" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5" style="color:#f59e0b"/></button>
             <button class="btn-icon" style="width:28px;height:28px" title="Move" @click.stop="startMove(f)"><Icon name="i-lucide-folder-symlink" class="w-3.5 h-3.5" style="color:#8b5cf6"/></button>
@@ -511,6 +550,45 @@ function showToast(msg: string) {
             <button class="btn-icon" style="width:28px;height:28px" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5" style="color:#ef4444"/></button>
           </div>
         </button>
+      </div>
+
+      <!-- GALLERY VIEW -->
+      <div v-else class="flex-1 overflow-y-auto p-4">
+        <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(148px,1fr))">
+          <div v-for="f in dm.sorted.value" :key="f.id"
+            class="group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-200"
+            :style="{background:'var(--surface-card)', border: selectedIds.has(f.id)?'2px solid #1da462':dm.selected.value?.id===f.id?'2px solid rgba(29,164,98,0.5)':'2px solid var(--border-subtle)', boxShadow: selectedIds.has(f.id)||dm.selected.value?.id===f.id?'0 0 0 2px rgba(29,164,98,0.2)':'none', transform:'translateZ(0)'}"
+            @click="dm.openFile(f)"
+          >
+            <!-- Thumbnail area -->
+            <div class="relative flex items-center justify-center overflow-hidden" style="aspect-ratio:1;background:var(--surface-elevated)">
+              <!-- Real thumbnail for images -->
+              <img v-if="f.thumbnailLink && dm.isImage(f)" :src="f.thumbnailLink" class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" :alt="f.name" referrerpolicy="no-referrer"/>
+              <!-- Icon fallback for non-images -->
+              <div v-else class="flex flex-col items-center gap-2" :style="{background:dm.fileColor(f)+'10'}" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
+                <Icon :name="dm.fileIcon(f)" class="w-14 h-14 transition-transform duration-200 group-hover:scale-110" :style="{color:dm.fileColor(f)}"/>
+              </div>
+              <!-- Select checkbox overlay -->
+              <div class="absolute top-2 left-2 w-5 h-5 rounded-md flex items-center justify-center transition-all duration-150"
+                :style="{background: selectedIds.has(f.id)?'#1da462':'rgba(0,0,0,0.35)', border:'1.5px solid '+(selectedIds.has(f.id)?'#1da462':'rgba(255,255,255,0.3)', opacity: selectedIds.has(f.id)?1:0, backdropFilter:'blur(4px)'}}"
+                :class="{'opacity-0 group-hover:opacity-100': !selectedIds.has(f.id)}"
+                @click.stop="toggleSelect(f)">
+                <Icon name="i-lucide-check" class="w-3 h-3 text-white"/>
+              </div>
+              <!-- Hover action overlay -->
+              <div class="absolute inset-0 flex items-end justify-center pb-2 gap-1 opacity-0 group-hover:opacity-100 transition-all duration-150" style="background:linear-gradient(to top,rgba(0,0,0,0.6) 0%,transparent 60%)">
+                <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5 text-white"/></button>
+                <button v-if="!dm.isFolder(f)" class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Download" @click.stop="dm.downloadFile(f)"><Icon name="i-lucide-download" class="w-3.5 h-3.5 text-white"/></button>
+                <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(239,68,68,0.7)" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5 text-white"/></button>
+              </div>
+            </div>
+            <!-- File name + meta -->
+            <div class="px-2.5 py-2">
+              <p class="text-[11px] font-semibold truncate leading-tight" style="color:var(--text-primary)">{{f.name}}</p>
+              <p class="text-[10px] mt-0.5" style="color:var(--text-tertiary)">{{dm.isFolder(f)?'Folder':dm.formatSize(f.size)||dm.formatDate(f.modifiedTime)}}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
