@@ -54,71 +54,147 @@ function addLog(icon: string, text: string, depth = 0) {
   nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
 }
 
-async function processOneProject(project: Project) {
+async function processOneProject(project: Project): Promise<boolean> {
   const folderId = extractFolderId(project.Project_Folder)
-  if (!folderId) { addLog('⏭️', `No folder URL — skipping`); return }
+  if (!folderId) { addLog('⏭️', `No folder URL — skipping`); return true }
 
   liveCopied.value = 0; liveSkipped.value = 0; liveFailed.value = 0
 
-  const res = await fetch('/api/transfer/process-stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderId, projectId: project.Project_ID }),
-  })
+  const MAX_RETRIES = 3
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let gotComplete = false
+    try {
+      if (attempt > 1) addLog('🔁', `Retry ${attempt}/${MAX_RETRIES} — stream reconnecting...`)
 
-  const reader = res.body?.getReader()
-  const decoder = new TextDecoder()
-  if (!reader) return
+      const res = await fetch('/api/transfer/process-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId, projectId: project.Project_ID }),
+      })
 
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      try {
-        const ev = JSON.parse(line.slice(6))
-        const indent = '  '.repeat(ev.depth || 0)
-        if (ev.copied !== undefined) { liveCopied.value = ev.copied; liveSkipped.value = ev.skipped; liveFailed.value = ev.failed }
-        switch (ev.type) {
-          case 'scan': addLog('📂', `${indent}Found ${ev.count} items`, ev.depth); break
-          case 'file_start': addLog('🔄', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
-          case 'file_done': addLog('✅', `${indent}${ev.name} → copied`, ev.depth); break
-          case 'file_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
-          case 'folder_start': addLog('📁', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
-          case 'folder_done': addLog('✅', `${indent}${ev.name} → recreated`, ev.depth); break
-          case 'folder_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
-          case 'skip': break
-          case 'complete': addLog('🎉', `Done! ${ev.copied} copied, ${ev.skipped} skipped, ${ev.failed} failed`); break
-          case 'error': addLog('💥', `Error: ${ev.message}`); break
+      if (!res.ok) {
+        addLog('❌', `Server error ${res.status} — ${res.statusText}`)
+        await new Promise(r => setTimeout(r, 3000))
+        continue
+      }
+
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) { addLog('❌', 'No response stream'); continue }
+
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const ev = JSON.parse(line.slice(6))
+            const indent = '  '.repeat(ev.depth || 0)
+            if (ev.copied !== undefined) { liveCopied.value = ev.copied; liveSkipped.value = ev.skipped; liveFailed.value = ev.failed }
+            switch (ev.type) {
+              case 'scan': addLog('📂', `${indent}Found ${ev.count} items`, ev.depth); break
+              case 'file_start': addLog('🔄', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
+              case 'file_done': addLog('✅', `${indent}${ev.name} → copied`, ev.depth); break
+              case 'file_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
+              case 'folder_start': addLog('📁', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
+              case 'folder_done': addLog('✅', `${indent}${ev.name} → recreated`, ev.depth); break
+              case 'folder_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
+              case 'skip': break
+              case 'complete': addLog('🎉', `Done! ${ev.copied} copied, ${ev.skipped} skipped, ${ev.failed} failed`); gotComplete = true; break
+              case 'error': addLog('💥', `Error: ${ev.message}`); break
+            }
+          } catch {}
         }
-      } catch {}
+      }
+
+      if (gotComplete) {
+        project.isTransfered = true
+        return true
+      }
+
+      // Stream ended without 'complete' — likely Vercel timeout. Retry.
+      addLog('⚠️', `Stream disconnected before completion (attempt ${attempt}/${MAX_RETRIES})`)
+      await new Promise(r => setTimeout(r, 2000))
+    } catch (err: any) {
+      addLog('💥', `Connection error: ${err.message || 'unknown'} (attempt ${attempt}/${MAX_RETRIES})`)
+      await new Promise(r => setTimeout(r, 3000))
     }
   }
+
+  // All retries exhausted — mark as done anyway (server-side already did partial work + BQ update)
+  addLog('⚠️', `Max retries reached — moving to next project`)
   project.isTransfered = true
+  return false
+}
+
+// ── Wake Lock — prevent browser/tab from sleeping ──
+let wakeLock: any = null
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await (navigator as any).wakeLock.request('screen')
+      addLog('🔒', 'Screen wake lock acquired — tab will stay active')
+    }
+  } catch {}
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null }
+}
+
+// ── Keepalive — ping every 20s to keep connection alive ──
+let keepaliveTimer: any = null
+function startKeepalive() {
+  stopKeepalive()
+  keepaliveTimer = setInterval(() => {
+    // Simple self-ping to prevent idle timeout
+    fetch('/api/auth/session').catch(() => {})
+  }, 20000)
+}
+function stopKeepalive() {
+  if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null }
 }
 
 async function startTransfer() {
   running.value = true; stopped.value = false; sessionProcessed.value = 0; liveLog.value = []; error.value = ''
+  await requestWakeLock()
+  startKeepalive()
+
   const pending = projects.value.filter(p => !p.isTransfered)
-  addLog('🚀', `Starting transfer of ${pending.length} projects...`)
+  addLog('🚀', `Starting transfer of ${pending.length} projects (auto-retry enabled)...`)
 
   for (let i = 0; i < pending.length; i++) {
     if (stopped.value) { addLog('🛑', 'Stopped by user'); break }
     currentIdx.value = i; currentProject.value = pending[i]!
     addLog('━', `━━━ [${i + 1}/${pending.length}] ${pending[i]!.Customer_Address || pending[i]!.Project_ID} ━━━`)
-    await processOneProject(pending[i]!)
+    try {
+      await processOneProject(pending[i]!)
+    } catch (err: any) {
+      addLog('💥', `Unexpected error: ${err.message} — continuing to next project`)
+    }
     sessionProcessed.value = i + 1
   }
+
+  releaseWakeLock()
+  stopKeepalive()
   currentProject.value = null; running.value = false
   if (!stopped.value) addLog('✨', `All done! ${sessionProcessed.value} projects processed.`)
 }
 
 function stopTransfer() { stopped.value = true; addLog('⏸️', 'Stopping after current project...') }
-onMounted(loadProjects)
+
+// ── Auto-start: check URL param ?auto=1 ──
+onMounted(async () => {
+  await loadProjects()
+  const route = useRoute()
+  if (route.query.auto === '1' && pendingProjects.value > 0) {
+    addLog('🤖', 'Auto-start enabled — beginning transfer...')
+    startTransfer()
+  }
+})
 </script>
 
 <template>

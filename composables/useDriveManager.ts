@@ -72,6 +72,9 @@ export function useDriveManager(rootId: Ref<string>) {
     if (f.mimeType === FOLDER_MIME) { openFolder(f); return }
     // CSV & XLSX files → open as Google Sheet (no preview panel)
     if (isSpreadsheetFile(f)) {
+      // Block double-clicks — if already converting, ignore
+      if (convertingFile.value) return
+
       const baseName = f.name.replace(/\.(csv|xlsx?)$/i, '')
 
       // Fast path: check if a Google Sheet with the same name already exists locally
