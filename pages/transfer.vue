@@ -1,267 +1,206 @@
 <script setup lang="ts">
 useHead({ title: 'Ownership Transfer - SWS Admin' })
 
-interface Project {
-  Project_ID: string
-  Customer_Address: string
-  Project_Folder: string
-  isTransfered: boolean | null
-}
+interface Project { Project_ID: string; Customer_Address: string; Project_Folder: string; isTransfered: boolean | null }
+interface LogEntry { icon: string; text: string; time: string; depth: number }
 
 const projects = ref<Project[]>([])
 const loading = ref(true)
 const running = ref(false)
 const stopped = ref(false)
-const currentIdx = ref(-1)
+const currentIdx = ref(0)
 const currentProject = ref<Project | null>(null)
-const currentStatus = ref('')
-const results = ref<{ id: string; address: string; status: string; copied: number; skipped: number; failed: number }[]>([])
+const liveLog = ref<LogEntry[]>([])
+const liveCopied = ref(0)
+const liveSkipped = ref(0)
+const liveFailed = ref(0)
+const sessionProcessed = ref(0)
 const error = ref('')
+const logBox = ref<HTMLElement | null>(null)
 
-// Stats
 const totalProjects = computed(() => projects.value.length)
 const pendingProjects = computed(() => projects.value.filter(p => !p.isTransfered).length)
 const doneProjects = computed(() => projects.value.filter(p => p.isTransfered).length)
 const progressPct = computed(() => {
-  if (!totalProjects.value) return 0
-  return Math.round(((doneProjects.value + results.value.length) / totalProjects.value) * 100)
+  const pending = projects.value.filter(p => !p.isTransfered)
+  if (!pending.length) return 100
+  return Math.round((sessionProcessed.value / pending.length) * 100)
 })
 
-// Extract folder ID from URL
 function extractFolderId(url: string): string | null {
-  if (!url) return null
-  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
-  return match ? match[1] : null
+  const m = url?.match(/folders\/([a-zA-Z0-9_-]+)/)
+  return m ? m[1] : null
 }
 
-// Load projects from BigQuery
+function now() { return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
+
 async function loadProjects() {
   loading.value = true
-  error.value = ''
   try {
-    const data = await $fetch<{ projects: any[] }>('/api/transfer/projects')
-    projects.value = (data.projects || []).map((p: any) => ({
+    const d = await $fetch<{ projects: any[] }>('/api/transfer/projects')
+    projects.value = (d.projects || []).map((p: any) => ({
       Project_ID: p.Project_ID || p['Project ID'] || '',
       Customer_Address: p.Customer_Address || p['Customer Address'] || '',
       Project_Folder: p.Project_Folder || p['Project Folder'] || '',
       isTransfered: p.isTransfered === true || p.isTransfered === 'true',
     }))
-  } catch (err: any) {
-    error.value = err.message || 'Failed to load projects'
-  }
+  } catch (e: any) { error.value = e.message }
   loading.value = false
 }
 
-// Process all pending projects
-async function startTransfer() {
-  running.value = true
-  stopped.value = false
-  results.value = []
-  error.value = ''
+function addLog(icon: string, text: string, depth = 0) {
+  liveLog.value.push({ icon, text, time: now(), depth })
+  if (liveLog.value.length > 500) liveLog.value.shift()
+  nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
+}
 
+async function processOneProject(project: Project) {
+  const folderId = extractFolderId(project.Project_Folder)
+  if (!folderId) { addLog('⏭️', `No folder URL — skipping`); return }
+
+  liveCopied.value = 0; liveSkipped.value = 0; liveFailed.value = 0
+
+  const res = await fetch('/api/transfer/process-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folderId, projectId: project.Project_ID }),
+  })
+
+  const reader = res.body?.getReader()
+  const decoder = new TextDecoder()
+  if (!reader) return
+
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const ev = JSON.parse(line.slice(6))
+        const indent = '  '.repeat(ev.depth || 0)
+        if (ev.copied !== undefined) { liveCopied.value = ev.copied; liveSkipped.value = ev.skipped; liveFailed.value = ev.failed }
+        switch (ev.type) {
+          case 'scan': addLog('📂', `${indent}Found ${ev.count} items`, ev.depth); break
+          case 'file_start': addLog('🔄', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
+          case 'file_done': addLog('✅', `${indent}${ev.name} → copied`, ev.depth); break
+          case 'file_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
+          case 'folder_start': addLog('📁', `${indent}${ev.name} (${ev.owner})`, ev.depth); break
+          case 'folder_done': addLog('✅', `${indent}${ev.name} → recreated`, ev.depth); break
+          case 'folder_error': addLog('❌', `${indent}${ev.name} — ${ev.error}`, ev.depth); break
+          case 'skip': break
+          case 'complete': addLog('🎉', `Done! ${ev.copied} copied, ${ev.skipped} skipped, ${ev.failed} failed`); break
+          case 'error': addLog('💥', `Error: ${ev.message}`); break
+        }
+      } catch {}
+    }
+  }
+  project.isTransfered = true
+}
+
+async function startTransfer() {
+  running.value = true; stopped.value = false; sessionProcessed.value = 0; liveLog.value = []; error.value = ''
   const pending = projects.value.filter(p => !p.isTransfered)
+  addLog('🚀', `Starting transfer of ${pending.length} projects...`)
 
   for (let i = 0; i < pending.length; i++) {
-    if (stopped.value) break
-
-    const project = pending[i]
-    currentIdx.value = i
-    currentProject.value = project
-    currentStatus.value = 'Processing...'
-
-    const folderId = extractFolderId(project.Project_Folder)
-    if (!folderId) {
-      results.value.push({
-        id: project.Project_ID,
-        address: project.Customer_Address,
-        status: 'skipped',
-        copied: 0, skipped: 0, failed: 0,
-      })
-      currentStatus.value = 'No valid folder URL'
-      continue
-    }
-
-    try {
-      const res = await $fetch<{ success: boolean; copied: number; skipped: number; failed: number }>(
-        '/api/transfer/process',
-        {
-          method: 'POST',
-          body: { folderId, projectId: project.Project_ID },
-          timeout: 300000, // 5 min timeout per project
-        },
-      )
-      project.isTransfered = true
-      results.value.push({
-        id: project.Project_ID,
-        address: project.Customer_Address,
-        status: 'done',
-        copied: res.copied,
-        skipped: res.skipped,
-        failed: res.failed,
-      })
-      currentStatus.value = `✅ Done — ${res.copied} copied, ${res.skipped} skipped`
-    } catch (err: any) {
-      results.value.push({
-        id: project.Project_ID,
-        address: project.Customer_Address,
-        status: 'error',
-        copied: 0, skipped: 0, failed: 1,
-      })
-      currentStatus.value = `❌ Error: ${err.message || 'Unknown'}`
-    }
-
-    // Small delay between projects
-    await new Promise(r => setTimeout(r, 500))
+    if (stopped.value) { addLog('🛑', 'Stopped by user'); break }
+    currentIdx.value = i; currentProject.value = pending[i]
+    addLog('━', `━━━ [${i + 1}/${pending.length}] ${pending[i].Customer_Address || pending[i].Project_ID} ━━━`)
+    await processOneProject(pending[i])
+    sessionProcessed.value = i + 1
   }
-
-  currentProject.value = null
-  currentIdx.value = -1
-  running.value = false
-  currentStatus.value = stopped.value ? 'Stopped by user' : 'All done!'
+  currentProject.value = null; running.value = false
+  if (!stopped.value) addLog('✨', `All done! ${sessionProcessed.value} projects processed.`)
 }
 
-function stopTransfer() {
-  stopped.value = true
-  currentStatus.value = 'Stopping after current project...'
-}
-
+function stopTransfer() { stopped.value = true; addLog('⏸️', 'Stopping after current project...') }
 onMounted(loadProjects)
 </script>
 
 <template>
-  <div class="transfer-page">
-    <!-- Header -->
-    <header class="transfer-header">
-      <div class="header-content">
-        <div class="header-left">
-          <div class="header-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M16 3h5v5"/>
-              <path d="M8 3H3v5"/>
-              <path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/>
-              <path d="m15 9 6-6"/>
-            </svg>
-          </div>
-          <div>
-            <h1>Ownership Transfer</h1>
-            <p class="subtitle">Bulk transfer Drive file ownership</p>
-          </div>
+  <div class="tp">
+    <header class="tp-hdr">
+      <div class="tp-hdr-in">
+        <div class="tp-hdr-left">
+          <div class="tp-icon"><Icon name="lucide:repeat" size="22"/></div>
+          <div><h1>Ownership Transfer</h1><p>Bulk copy &amp; archive from BigQuery Projects</p></div>
         </div>
-        <div class="header-actions">
-          <button v-if="!running" class="btn btn-primary" :disabled="loading || pendingProjects === 0" @click="startTransfer">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
-            Start Transfer
-          </button>
-          <button v-else class="btn btn-danger" @click="stopTransfer">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-            Stop
-          </button>
-          <button class="btn btn-secondary" :disabled="running" @click="loadProjects">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Refresh
-          </button>
+        <div class="tp-hdr-acts">
+          <button v-if="!running" class="btn bp" :disabled="loading||pendingProjects===0" @click="startTransfer">▶ Start</button>
+          <button v-else class="btn bd" @click="stopTransfer">◼ Stop</button>
+          <button class="btn bs" :disabled="running" @click="loadProjects">↻ Refresh</button>
         </div>
       </div>
     </header>
 
-    <!-- Stats Cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-value">{{ totalProjects }}</div>
-        <div class="stat-label">Total Projects</div>
+    <div class="tp-body">
+      <!-- Stats -->
+      <div class="stats">
+        <div class="sc"><div class="sv">{{ totalProjects }}</div><div class="sl">Total</div></div>
+        <div class="sc sp"><div class="sv">{{ pendingProjects }}</div><div class="sl">Pending</div></div>
+        <div class="sc sd"><div class="sv">{{ doneProjects + sessionProcessed }}</div><div class="sl">Done</div></div>
+        <div class="sc ss"><div class="sv">{{ sessionProcessed }}</div><div class="sl">This Session</div></div>
       </div>
-      <div class="stat-card stat-pending">
-        <div class="stat-value">{{ pendingProjects }}</div>
-        <div class="stat-label">Pending</div>
-      </div>
-      <div class="stat-card stat-done">
-        <div class="stat-value">{{ doneProjects }}</div>
-        <div class="stat-label">Already Done</div>
-      </div>
-      <div class="stat-card stat-session">
-        <div class="stat-value">{{ results.length }}</div>
-        <div class="stat-label">This Session</div>
-      </div>
-    </div>
 
-    <!-- Progress Bar -->
-    <div v-if="running || results.length > 0" class="progress-section">
-      <div class="progress-header">
-        <span class="progress-text">
-          <template v-if="running && currentProject">
-            Processing: <strong>{{ currentProject.Customer_Address || currentProject.Project_ID }}</strong>
-          </template>
-          <template v-else-if="!running && results.length">
-            {{ currentStatus }}
-          </template>
-        </span>
-        <span class="progress-pct">{{ progressPct }}%</span>
-      </div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" :style="{ width: progressPct + '%' }" :class="{ pulsing: running }"/>
-      </div>
-      <div class="progress-sub">
-        {{ doneProjects + results.length }} / {{ totalProjects }} projects processed
-      </div>
-    </div>
-
-    <!-- Current Status -->
-    <div v-if="running && currentStatus" class="current-status">
-      <div class="status-dot" :class="{ active: running }"/>
-      {{ currentStatus }}
-    </div>
-
-    <!-- Error -->
-    <div v-if="error" class="error-banner">{{ error }}</div>
-
-    <!-- Loading -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"/>
-      <span>Loading projects from BigQuery...</span>
-    </div>
-
-    <!-- Results Log -->
-    <div v-if="results.length > 0" class="results-section">
-      <h2>Session Log</h2>
-      <div class="results-table">
-        <div class="results-header">
-          <span class="col-status">Status</span>
-          <span class="col-id">Project ID</span>
-          <span class="col-address">Address</span>
-          <span class="col-stats">Copied</span>
-          <span class="col-stats">Skipped</span>
-          <span class="col-stats">Failed</span>
-        </div>
-        <div v-for="r in [...results].reverse()" :key="r.id" class="results-row" :class="'row-' + r.status">
-          <span class="col-status">
-            <span v-if="r.status === 'done'" class="badge badge-done">✅</span>
-            <span v-else-if="r.status === 'error'" class="badge badge-error">❌</span>
-            <span v-else class="badge badge-skip">⏭️</span>
+      <!-- Progress -->
+      <div v-if="running||sessionProcessed>0" class="prog">
+        <div class="prog-top">
+          <span v-if="currentProject" class="prog-cur">
+            Currently: <a :href="currentProject.Project_Folder" target="_blank" class="prog-link">
+              {{ currentProject.Customer_Address || currentProject.Project_ID }}
+              <Icon name="lucide:external-link" size="12"/>
+            </a>
           </span>
-          <span class="col-id">{{ r.id }}</span>
-          <span class="col-address">{{ r.address }}</span>
-          <span class="col-stats">{{ r.copied }}</span>
-          <span class="col-stats">{{ r.skipped }}</span>
-          <span class="col-stats">{{ r.failed }}</span>
+          <span v-else class="prog-cur">{{ stopped ? 'Stopped' : 'Complete' }}</span>
+          <span class="prog-pct">{{ progressPct }}%</span>
+        </div>
+        <div class="prog-track"><div class="prog-fill" :class="{pulse:running}" :style="{width:progressPct+'%'}"/></div>
+      </div>
+
+      <!-- Live counters -->
+      <div v-if="running" class="live-counts">
+        <span class="lc lc-c">✅ {{ liveCopied }} copied</span>
+        <span class="lc lc-s">⏭️ {{ liveSkipped }} skipped</span>
+        <span class="lc lc-f">❌ {{ liveFailed }} failed</span>
+      </div>
+
+      <!-- Error -->
+      <div v-if="error" class="err">{{ error }}</div>
+
+      <!-- Loading -->
+      <div v-if="loading" class="ld"><div class="spinner"/>Loading projects...</div>
+
+      <!-- Live Log Terminal -->
+      <div v-if="liveLog.length>0" class="terminal">
+        <div class="term-hdr">
+          <div class="term-dots"><span/><span/><span/></div>
+          <span>Live Transfer Log</span>
+        </div>
+        <div ref="logBox" class="term-body">
+          <div v-for="(l,i) in liveLog" :key="i" class="term-line" :class="{'term-sep':l.icon==='━'}">
+            <span class="term-time">{{ l.time }}</span>
+            <span class="term-icon">{{ l.icon }}</span>
+            <span class="term-text" :style="{paddingLeft:(l.depth*12)+'px'}">{{ l.text }}</span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Projects Preview (when not running) -->
-    <div v-if="!loading && !running && projects.length > 0" class="projects-preview">
-      <h2>Projects ({{ pendingProjects }} pending)</h2>
-      <div class="preview-list">
-        <div v-for="p in projects.slice(0, 100)" :key="p.Project_ID" class="preview-item" :class="{ 'is-done': p.isTransfered }">
-          <span class="preview-status">
-            <span v-if="p.isTransfered" class="dot dot-done"/>
-            <span v-else class="dot dot-pending"/>
-          </span>
-          <span class="preview-id">{{ p.Project_ID }}</span>
-          <span class="preview-address">{{ p.Customer_Address }}</span>
-          <span class="preview-transferred" v-if="p.isTransfered">transferred</span>
-        </div>
-        <div v-if="projects.length > 100" class="preview-more">
-          ... and {{ projects.length - 100 }} more
+      <!-- Projects list -->
+      <div v-if="!loading&&projects.length>0&&liveLog.length===0" class="plist">
+        <h2>Projects ({{ pendingProjects }} pending of {{ totalProjects }})</h2>
+        <div class="plist-box">
+          <div v-for="p in projects.slice(0,200)" :key="p.Project_ID" class="prow" :class="{'pdone':p.isTransfered}">
+            <span class="pdot" :class="p.isTransfered?'pdot-d':'pdot-p'"/>
+            <span class="pid">{{ p.Project_ID }}</span>
+            <span class="padr">{{ p.Customer_Address }}</span>
+            <a v-if="p.Project_Folder" :href="p.Project_Folder" target="_blank" class="pflink"><Icon name="lucide:folder" size="14"/></a>
+            <span v-if="p.isTransfered" class="ptag">transferred</span>
+          </div>
+          <div v-if="projects.length>200" class="pmore">...and {{ projects.length-200 }} more</div>
         </div>
       </div>
     </div>
@@ -269,287 +208,81 @@ onMounted(loadProjects)
 </template>
 
 <style scoped>
-.transfer-page {
-  min-height: 100vh;
-  background: #0a0a0f;
-  color: #e4e4e7;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  padding-bottom: 4rem;
-}
+.tp{min-height:100vh;background:#08080c;color:#e4e4e7;font-family:Inter,-apple-system,sans-serif}
+.tp-hdr{background:linear-gradient(135deg,rgba(59,130,246,.07),rgba(139,92,246,.07));border-bottom:1px solid rgba(255,255,255,.05);padding:1rem 2rem}
+.tp-hdr-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between}
+.tp-hdr-left{display:flex;align-items:center;gap:.75rem}
+.tp-icon{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff}
+h1{font-size:1.15rem;font-weight:700;margin:0;color:#f4f4f5}
+.tp-hdr-left p{font-size:.75rem;color:#52525b;margin:0}
+.tp-hdr-acts{display:flex;gap:.5rem}
+.tp-body{max-width:1200px;margin:0 auto;padding:1.5rem 2rem}
 
-/* Header */
-.transfer-header {
-  background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08));
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  padding: 1.25rem 2rem;
-}
-.header-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-.header-icon {
-  width: 44px; height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
-h1 { font-size: 1.25rem; font-weight: 700; margin: 0; color: #f4f4f5; }
-.subtitle { font-size: 0.8rem; color: #71717a; margin: 0; }
-.header-actions { display: flex; gap: 0.5rem; }
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem 1.1rem;border:none;border-radius:10px;font-size:.82rem;font-weight:600;cursor:pointer;transition:.2s}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.bp{background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;box-shadow:0 0 20px rgba(59,130,246,.2)}
+.bp:hover:not(:disabled){box-shadow:0 0 30px rgba(59,130,246,.4);transform:translateY(-1px)}
+.bd{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff}
+.bs{background:rgba(255,255,255,.05);color:#71717a;border:1px solid rgba(255,255,255,.08)}
+.bs:hover:not(:disabled){background:rgba(255,255,255,.08);color:#fff}
 
-/* Buttons */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1.25rem;
-  border: none;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
-  box-shadow: 0 0 20px rgba(59,130,246,0.25);
-}
-.btn-primary:hover:not(:disabled) { box-shadow: 0 0 30px rgba(59,130,246,0.4); transform: translateY(-1px); }
-.btn-danger {
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: white;
-  box-shadow: 0 0 20px rgba(239,68,68,0.25);
-}
-.btn-danger:hover { box-shadow: 0 0 30px rgba(239,68,68,0.4); }
-.btn-secondary {
-  background: rgba(255,255,255,0.06);
-  color: #a1a1aa;
-  border: 1px solid rgba(255,255,255,0.08);
-}
-.btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.1); color: white; }
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1.5rem}
+.sc{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);border-radius:14px;padding:1rem;text-align:center}
+.sv{font-size:1.75rem;font-weight:800;color:#f4f4f5;font-variant-numeric:tabular-nums}
+.sl{font-size:.65rem;color:#52525b;margin-top:.15rem;text-transform:uppercase;letter-spacing:.06em}
+.sp .sv{color:#f59e0b}.sd .sv{color:#22c55e}.ss .sv{color:#3b82f6}
 
-/* Stats */
-.stats-grid {
-  max-width: 1200px;
-  margin: 1.5rem auto;
-  padding: 0 2rem;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
-}
-.stat-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 14px;
-  padding: 1.25rem;
-  text-align: center;
-}
-.stat-value { font-size: 2rem; font-weight: 800; color: #f4f4f5; font-variant-numeric: tabular-nums; }
-.stat-label { font-size: 0.75rem; color: #71717a; margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.stat-pending .stat-value { color: #f59e0b; }
-.stat-done .stat-value { color: #22c55e; }
-.stat-session .stat-value { color: #3b82f6; }
+.prog{margin-bottom:1.25rem}
+.prog-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem}
+.prog-cur{font-size:.82rem;color:#a1a1aa}
+.prog-link{color:#60a5fa;text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.prog-link:hover{text-decoration:underline;color:#93c5fd}
+.prog-pct{font-size:1.4rem;font-weight:800;color:#3b82f6}
+.prog-track{height:6px;background:rgba(255,255,255,.05);border-radius:6px;overflow:hidden}
+.prog-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:6px;transition:width .4s}
+.prog-fill.pulse{animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
 
-/* Progress */
-.progress-section {
-  max-width: 1200px;
-  margin: 1.5rem auto;
-  padding: 0 2rem;
-}
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-.progress-text { font-size: 0.85rem; color: #a1a1aa; }
-.progress-text strong { color: #f4f4f5; }
-.progress-pct { font-size: 1.5rem; font-weight: 800; color: #3b82f6; }
-.progress-bar-track {
-  height: 8px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-  border-radius: 8px;
-  transition: width 0.5s ease;
-}
-.progress-bar-fill.pulsing {
-  animation: pulse-bar 1.5s ease-in-out infinite;
-}
-@keyframes pulse-bar {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-.progress-sub { font-size: 0.75rem; color: #52525b; margin-top: 0.5rem; text-align: right; }
+.live-counts{display:flex;gap:1.25rem;margin-bottom:1.25rem}
+.lc{font-size:.8rem;padding:.3rem .75rem;border-radius:8px;font-weight:600;font-variant-numeric:tabular-nums}
+.lc-c{background:rgba(34,197,94,.08);color:#4ade80}
+.lc-s{background:rgba(234,179,8,.08);color:#facc15}
+.lc-f{background:rgba(239,68,68,.08);color:#f87171}
 
-/* Current Status */
-.current-status {
-  max-width: 1200px;
-  margin: 1rem auto;
-  padding: 0.75rem 2rem;
-  font-size: 0.85rem;
-  color: #a1a1aa;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.status-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: #52525b;
-}
-.status-dot.active {
-  background: #22c55e;
-  animation: blink 1s infinite;
-}
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.err{padding:.6rem 1rem;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.15);border-radius:10px;color:#fca5a5;font-size:.82rem;margin-bottom:1rem}
+.ld{text-align:center;color:#52525b;font-size:.85rem;padding:3rem 0;display:flex;align-items:center;justify-content:center;gap:.6rem}
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.08);border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-/* Error */
-.error-banner {
-  max-width: 1200px;
-  margin: 1rem auto;
-  padding: 0.75rem 1.25rem;
-  background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.2);
-  border-radius: 10px;
-  color: #fca5a5;
-  font-size: 0.85rem;
-  margin-left: 2rem;
-  margin-right: 2rem;
-}
+/* Terminal */
+.terminal{background:#0c0c14;border:1px solid rgba(255,255,255,.06);border-radius:14px;overflow:hidden;margin-bottom:1.5rem}
+.term-hdr{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.04);font-size:.72rem;color:#52525b}
+.term-dots{display:flex;gap:5px}
+.term-dots span{width:10px;height:10px;border-radius:50%}
+.term-dots span:nth-child(1){background:#ef4444}
+.term-dots span:nth-child(2){background:#f59e0b}
+.term-dots span:nth-child(3){background:#22c55e}
+.term-body{max-height:420px;overflow-y:auto;padding:.5rem 0;font-family:'JetBrains Mono','Fira Code',monospace;font-size:.72rem;line-height:1.7}
+.term-line{display:flex;align-items:flex-start;padding:0 1rem;gap:.5rem}
+.term-line:hover{background:rgba(255,255,255,.02)}
+.term-sep{margin:.4rem 0;color:#3b82f6!important;font-weight:700}
+.term-sep .term-text{color:#60a5fa;font-weight:700}
+.term-time{color:#3f3f46;min-width:62px;flex-shrink:0}
+.term-icon{flex-shrink:0;width:18px;text-align:center}
+.term-text{color:#a1a1aa;white-space:pre-wrap;word-break:break-all}
 
-/* Loading */
-.loading-state {
-  max-width: 1200px;
-  margin: 3rem auto;
-  text-align: center;
-  color: #71717a;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-}
-.spinner {
-  width: 20px; height: 20px;
-  border: 2px solid rgba(255,255,255,0.1);
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* Results */
-.results-section {
-  max-width: 1200px;
-  margin: 2rem auto;
-  padding: 0 2rem;
-}
-.results-section h2 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #a1a1aa;
-  margin-bottom: 0.75rem;
-}
-.results-table {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
-  overflow: hidden;
-  max-height: 400px;
-  overflow-y: auto;
-}
-.results-header, .results-row {
-  display: grid;
-  grid-template-columns: 60px 120px 1fr 80px 80px 80px;
-  padding: 0.6rem 1rem;
-  align-items: center;
-  font-size: 0.8rem;
-}
-.results-header {
-  background: rgba(255,255,255,0.04);
-  color: #71717a;
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  position: sticky;
-  top: 0;
-}
-.results-row {
-  border-top: 1px solid rgba(255,255,255,0.04);
-}
-.results-row:hover { background: rgba(255,255,255,0.03); }
-.row-done { color: #d4d4d8; }
-.row-error { color: #fca5a5; }
-.row-skipped { color: #a1a1aa; }
-.col-stats { text-align: center; font-variant-numeric: tabular-nums; }
-.col-address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge { font-size: 1rem; }
-
-/* Projects Preview */
-.projects-preview {
-  max-width: 1200px;
-  margin: 2rem auto;
-  padding: 0 2rem;
-}
-.projects-preview h2 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #a1a1aa;
-  margin-bottom: 0.75rem;
-}
-.preview-list {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
-  overflow: hidden;
-  max-height: 500px;
-  overflow-y: auto;
-}
-.preview-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 1rem;
-  border-top: 1px solid rgba(255,255,255,0.03);
-  font-size: 0.8rem;
-}
-.preview-item:first-child { border-top: none; }
-.preview-item.is-done { opacity: 0.4; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot-done { background: #22c55e; }
-.dot-pending { background: #f59e0b; }
-.preview-id { width: 120px; color: #71717a; font-variant-numeric: tabular-nums; }
-.preview-address { flex: 1; color: #d4d4d8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.preview-transferred {
-  font-size: 0.7rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
-  background: rgba(34,197,94,0.1);
-  color: #4ade80;
-}
-.preview-more {
-  text-align: center;
-  padding: 0.75rem;
-  color: #52525b;
-  font-size: 0.8rem;
-}
+/* Projects list */
+.plist h2{font-size:.9rem;font-weight:600;color:#71717a;margin-bottom:.6rem}
+.plist-box{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:12px;overflow:hidden;max-height:500px;overflow-y:auto}
+.prow{display:flex;align-items:center;gap:.6rem;padding:.4rem 1rem;border-top:1px solid rgba(255,255,255,.03);font-size:.78rem}
+.prow:first-child{border-top:none}
+.pdone{opacity:.35}
+.pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.pdot-d{background:#22c55e}.pdot-p{background:#f59e0b}
+.pid{width:100px;color:#52525b;font-variant-numeric:tabular-nums}
+.padr{flex:1;color:#d4d4d8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pflink{color:#3b82f6;display:flex;align-items:center;opacity:.5;transition:.2s}
+.pflink:hover{opacity:1}
+.ptag{font-size:.6rem;padding:.1rem .4rem;border-radius:5px;background:rgba(34,197,94,.08);color:#4ade80}
+.pmore{text-align:center;padding:.5rem;color:#3f3f46;font-size:.75rem}
 </style>
