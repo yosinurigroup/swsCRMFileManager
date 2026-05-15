@@ -6,6 +6,8 @@ const OFFICE_DOC_MIMES = ['application/msword','application/vnd.openxmlformats-o
 const OFFICE_SHEET_MIMES = ['application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
 const OFFICE_PRES_MIMES = ['application/vnd.ms-powerpoint','application/vnd.openxmlformats-officedocument.presentationml.presentation']
 const ARCHIVE_MIMES = ['application/zip','application/x-zip-compressed','application/x-rar-compressed','application/vnd.rar','application/x-7z-compressed','application/gzip']
+const CSV_MIMES = ['text/csv','application/csv','text/comma-separated-values']
+const SPREADSHEET_FILE_MIMES = [...OFFICE_SHEET_MIMES, ...CSV_MIMES]
 const PREVIEWABLE = [
   ...IMAGE_MIMES, ...VIDEO_MIMES, ...AUDIO_MIMES,
   ...OFFICE_DOC_MIMES, ...OFFICE_SHEET_MIMES, ...OFFICE_PRES_MIMES,
@@ -65,6 +67,11 @@ export function useDriveManager(rootId: Ref<string>) {
 
   function openFile(f: DriveFile) {
     if (f.mimeType === FOLDER_MIME) { openFolder(f); return }
+    // CSV & XLSX files → open directly in Google Sheets
+    if (isSpreadsheetFile(f)) {
+      window.open(`https://docs.google.com/spreadsheets/d/${f.id}`, '_blank')
+      return
+    }
     previewLoaded.value = false; selected.value = f
   }
 
@@ -81,6 +88,9 @@ export function useDriveManager(rootId: Ref<string>) {
   function isAudio(f: DriveFile) { return AUDIO_MIMES.includes(f.mimeType) }
   function isVideo(f: DriveFile) { return VIDEO_MIMES.includes(f.mimeType) }
   function isArchive(f: DriveFile) { return ARCHIVE_MIMES.includes(f.mimeType) }
+  function isSpreadsheetFile(f: DriveFile) {
+    return SPREADSHEET_FILE_MIMES.includes(f.mimeType) || /\.(csv|xlsx?)$/i.test(f.name)
+  }
   function isGoogleWorkspace(f: DriveFile) {
     return ['application/vnd.google-apps.document','application/vnd.google-apps.spreadsheet','application/vnd.google-apps.presentation'].includes(f.mimeType)
   }
@@ -197,7 +207,7 @@ export function useDriveManager(rootId: Ref<string>) {
     folderStack, files, loading, error, selected, previewLoaded, rootFolderName,
     currentFolderId, sorted, folderCount, fileCount,
     fetchFiles, openFolder, goBack, goToRoot, goToBreadcrumb, openFile,
-    previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive,
+    previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive, isSpreadsheetFile,
     isGoogleWorkspace, isOfficeFile, googleWorkspaceLabel,
     downloadFile, openExternal, openInDrive,
     renameFile, createFolder, moveFile, copyFile, deleteFile, uploadFiles,
