@@ -626,7 +626,8 @@ function showToast(msg: string) {
             <Icon v-if="selectedIds.has(f.id)" name="i-lucide-check" class="w-3 h-3 text-white"/>
           </div>
           <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105" :style="{background:dm.fileColor(f)+'15'}">
-            <Icon :name="dm.fileIcon(f)" class="w-5 h-5" :style="{color:dm.fileColor(f)}"/>
+            <Icon v-if="dm.convertingFile.value?.id === f.id" name="i-lucide-loader-2" class="w-5 h-5 animate-spin" style="color:#10b981"/>
+            <Icon v-else :name="dm.fileIcon(f)" class="w-5 h-5" :style="{color:dm.fileColor(f)}"/>
           </div>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium truncate" style="color:var(--text-primary)">{{f.name}}</p>

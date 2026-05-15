@@ -65,18 +65,39 @@ export function useDriveManager(rootId: Ref<string>) {
   function goToRoot() { selected.value = null; folderStack.value = [] }
   function goToBreadcrumb(i: number) { selected.value = null; folderStack.value = folderStack.value.slice(0,i+1) }
 
+  // Track file currently being converted (for UI loading indicator)
+  const convertingFile = ref<DriveFile | null>(null)
+
   async function openFile(f: DriveFile) {
     if (f.mimeType === FOLDER_MIME) { openFolder(f); return }
-    // CSV & XLSX files → convert to Google Sheets via API and open
+    // CSV & XLSX files → open as Google Sheet (no preview panel)
     if (isSpreadsheetFile(f)) {
+      const baseName = f.name.replace(/\.(csv|xlsx?)$/i, '')
+
+      // Fast path: check if a Google Sheet with the same name already exists locally
+      const existingSheet = files.value.find(
+        x => x.name === baseName && x.mimeType === 'application/vnd.google-apps.spreadsheet'
+      )
+      if (existingSheet) {
+        // Open instantly — no server call needed
+        window.open(existingSheet.webViewLink || `https://docs.google.com/spreadsheets/d/${existingSheet.id}/edit`, '_blank')
+        return
+      }
+
+      // Slow path: first-time conversion via server
+      convertingFile.value = f
       try {
         const r = await $fetch<{success:boolean,url:string}>('/api/drive/open-as-sheet', {
           method: 'POST', body: { fileId: f.id, rootFolderId: rootId.value },
         })
         if (r.url) window.open(r.url, '_blank')
+        // Refresh file list since CSV was moved and Sheet was created
+        await fetchFiles(currentFolderId.value!)
       } catch {
         // Fallback: open in Drive viewer
         window.open(f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`, '_blank')
+      } finally {
+        convertingFile.value = null
       }
       return
     }
@@ -212,7 +233,7 @@ export function useDriveManager(rootId: Ref<string>) {
   }
 
   return {
-    folderStack, files, loading, error, selected, previewLoaded, rootFolderName,
+    folderStack, files, loading, error, selected, previewLoaded, rootFolderName, convertingFile,
     currentFolderId, sorted, folderCount, fileCount,
     fetchFiles, openFolder, goBack, goToRoot, goToBreadcrumb, openFile,
     previewUrl, streamUrl, canPreview, isFolder, isImage, isAudio, isVideo, isArchive, isSpreadsheetFile,
