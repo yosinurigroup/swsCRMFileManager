@@ -32,7 +32,6 @@ const uploadTotal = ref(0)
 const uploadCurrent = ref(0)
 const uploadCurrentName = ref('')
 const fileInputRef = ref<HTMLInputElement|null>(null)
-const folderInputRef = ref<HTMLInputElement|null>(null)
 let dragCounter = 0
 
 // Rename state
@@ -105,17 +104,6 @@ function onFileInput(e: Event) {
   if (isUploading.value) return // prevent double-fire (Chrome webkitdirectory quirk)
   const input = e.target as HTMLInputElement
   if(input.files?.length) doUpload(Array.from(input.files), [])
-  input.value = ''
-}
-
-function onFolderInput(e: Event) {
-  if (isUploading.value) return // prevent double-fire (Chrome webkitdirectory quirk)
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-  const files = Array.from(input.files)
-  // webkitRelativePath gives us e.g. "FolderName/sub/file.txt"
-  const paths = files.map(f => (f as any).webkitRelativePath || f.name)
-  doUpload(files, paths)
   input.value = ''
 }
 
@@ -627,20 +615,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           </div>
         </Transition>
       </div>
-      <!-- Upload split button: files + folder -->
-      <div class="flex items-center rounded-xl overflow-hidden shrink-0" style="border:1.5px solid #1da462">
-        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#1da462,#0f7b3f);color:#fff" :disabled="isUploading" @click="fileInputRef?.click()" title="Upload files">
-          <Icon :name="isUploading?'i-lucide-loader-2':'i-lucide-upload'" class="w-4 h-4" :class="{'animate-spin':isUploading}"/>
-          Upload
-        </button>
-        <div style="width:1px;height:100%;background:rgba(255,255,255,0.25)"></div>
-        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#178a52,#0c6633);color:#fff" :disabled="isUploading" @click="folderInputRef?.click()" title="Upload folder">
-          <Icon name="i-lucide-folder-up" class="w-4 h-4"/>
-          Folder
-        </button>
-      </div>
+      <!-- Upload button (folders supported via drag & drop) -->
+      <button class="btn-primary" :disabled="isUploading" @click="fileInputRef?.click()" title="Upload files — drag &amp; drop to upload folders">
+        <Icon :name="isUploading?'i-lucide-loader-2':'i-lucide-upload'" class="w-4 h-4" :class="{'animate-spin':isUploading}"/>Upload
+      </button>
       <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileInput">
-      <input ref="folderInputRef" type="file" multiple class="hidden" webkitdirectory @change="onFolderInput">
 
       <!-- User badge -->
       <div v-if="session.authenticated" class="flex items-center gap-2 pl-2 ml-1" style="border-left:1px solid var(--border-subtle)">

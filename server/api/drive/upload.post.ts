@@ -20,7 +20,9 @@ export default defineEventHandler(async (event) => {
     // Cache of created folders: relative path → Drive folder ID
     const folderCache: Record<string, string> = { '': folderId }
 
-    // Ensure a folder path exists in Drive, creating parent folders as needed
+    // Ensure a folder path exists in Drive, creating parent folders as needed.
+    // Checks for an existing folder before creating to avoid duplicates —
+    // critical because each file upload is a separate HTTP request with a fresh folderCache.
     async function ensureFolder(relativePath: string): Promise<string> {
       if (folderCache[relativePath]) return folderCache[relativePath]!
 
@@ -31,12 +33,27 @@ export default defineEventHandler(async (event) => {
         builtPath = builtPath ? `${builtPath}/${part}` : part
         if (!folderCache[builtPath]) {
           const parentId = folderCache[parentPath]!
-          const res = await drive.files.create({
-            requestBody: { name: part, mimeType: FOLDER_MIME, parents: [parentId] },
-            fields: 'id',
+          // Escape single quotes in folder name for the Drive query
+          const escaped = part.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+          // Look for an existing folder with this name under the same parent
+          const existing = await drive.files.list({
+            q: `name='${escaped}' and mimeType='${FOLDER_MIME}' and '${parentId}' in parents and trashed=false`,
+            fields: 'files(id)',
             supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+            pageSize: 1,
           })
-          folderCache[builtPath] = res.data.id!
+          if (existing.data.files?.length) {
+            // Reuse the existing folder — don't create a duplicate
+            folderCache[builtPath] = existing.data.files[0]!.id!
+          } else {
+            const res = await drive.files.create({
+              requestBody: { name: part, mimeType: FOLDER_MIME, parents: [parentId] },
+              fields: 'id',
+              supportsAllDrives: true,
+            })
+            folderCache[builtPath] = res.data.id!
+          }
         }
       }
       return folderCache[relativePath]!
