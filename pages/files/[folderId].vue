@@ -32,8 +32,6 @@ const uploadTotal = ref(0)
 const uploadCurrent = ref(0)
 const uploadCurrentName = ref('')
 const fileInputRef = ref<HTMLInputElement|null>(null)
-const folderInputRef = ref<HTMLInputElement|null>(null)
-const showFolderDrop = ref(false)
 let dragCounter = 0
 
 // Rename state
@@ -109,35 +107,30 @@ function onFileInput(e: Event) {
   input.value = ''
 }
 
-// Folder drop zone handlers (avoids Chrome's native security dialog)
-let folderDropCounter = 0
-function onFolderDropEnter(e: DragEvent) { e.preventDefault(); e.stopPropagation(); folderDropCounter++ }
-function onFolderDropLeave(e: DragEvent) { e.preventDefault(); e.stopPropagation(); folderDropCounter--; if (folderDropCounter <= 0) folderDropCounter = 0 }
-function onFolderDropOver(e: DragEvent) { e.preventDefault(); e.stopPropagation(); e.dataTransfer!.dropEffect = 'copy' }
-async function onFolderDropDrop(e: DragEvent) {
-  e.preventDefault(); e.stopPropagation(); folderDropCounter = 0; showFolderDrop.value = false
-  if (!e.dataTransfer) return
-  const items = Array.from(e.dataTransfer.items)
-  const collected: {file: File, path: string}[] = []
-  for (const item of items) {
-    const entry = item.webkitGetAsEntry?.()
-    if (entry) {
-      const results = await collectEntryFiles(entry, '')
-      collected.push(...results)
+// Folder upload via File System Access API (no Chrome warning dialog)
+async function pickFolder() {
+  if (isUploading.value) return
+  try {
+    // showDirectoryPicker opens native OS folder browser — no security warning
+    const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' })
+    const collected: {file: File, path: string}[] = []
+    await collectDirHandle(dirHandle, dirHandle.name, collected)
+    if (collected.length) doUpload(collected.map(c => c.file), collected.map(c => c.path))
+  } catch (e: any) {
+    // User cancelled the picker — ignore
+    if (e.name !== 'AbortError') console.error('Folder pick failed:', e)
+  }
+}
+async function collectDirHandle(dirHandle: any, basePath: string, results: {file: File, path: string}[]) {
+  for await (const entry of dirHandle.values()) {
+    const entryPath = basePath ? `${basePath}/${entry.name}` : entry.name
+    if (entry.kind === 'file') {
+      const file = await entry.getFile()
+      results.push({ file, path: entryPath })
+    } else if (entry.kind === 'directory') {
+      await collectDirHandle(entry, entryPath, results)
     }
   }
-  if (collected.length) doUpload(collected.map(c => c.file), collected.map(c => c.path))
-}
-
-function onFolderInput(e: Event) {
-  if (isUploading.value) return
-  showFolderDrop.value = false
-  const input = e.target as HTMLInputElement
-  if (!input.files?.length) return
-  const files = Array.from(input.files)
-  const paths = files.map(f => (f as any).webkitRelativePath || f.name)
-  doUpload(files, paths)
-  input.value = ''
 }
 
 // Threshold: files larger than this use chunked resumable upload
@@ -655,7 +648,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           Upload
         </button>
         <div style="width:1px;height:100%;background:rgba(255,255,255,0.25)"></div>
-        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#178a52,#0c6633);color:#fff" :disabled="isUploading" @click="showFolderDrop=true" title="Upload folder">
+        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#178a52,#0c6633);color:#fff" :disabled="isUploading" @click="pickFolder()" title="Upload folder">
           <Icon name="i-lucide-folder-up" class="w-4 h-4"/>
           Folder
         </button>
@@ -693,48 +686,6 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
     </div>
   </div>
 
-  <!-- FOLDER DROP ZONE MODAL -->
-  <div v-if="showFolderDrop" class="fixed inset-0 z-[101] flex items-center justify-center" style="background:rgba(0,0,0,0.6);backdrop-filter:blur(6px)" @click.self="showFolderDrop=false">
-    <div class="w-full max-w-lg mx-4 rounded-3xl overflow-hidden" style="background:var(--surface-card);border:1px solid var(--border-subtle);box-shadow:0 24px 60px rgba(0,0,0,0.5)">
-      <div class="flex items-center justify-between px-6 py-4" style="border-bottom:1px solid var(--border-subtle)">
-        <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:rgba(29,164,98,0.1)">
-            <Icon name="i-lucide-folder-up" class="w-4.5 h-4.5" style="color:#1da462"/>
-          </div>
-          <div>
-            <p class="text-sm font-bold" style="color:var(--text-primary)">Upload Folder</p>
-            <p class="text-[11px]" style="color:var(--text-tertiary)">Drag &amp; drop a folder below</p>
-          </div>
-        </div>
-        <button class="btn-icon" @click="showFolderDrop=false"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
-      </div>
-      <div class="px-6 py-10"
-        @dragenter="onFolderDropEnter"
-        @dragleave="onFolderDropLeave"
-        @dragover="onFolderDropOver"
-        @drop="onFolderDropDrop"
-      >
-        <div class="flex flex-col items-center justify-center gap-4 py-8 rounded-2xl transition-all" style="border:2px dashed var(--border-medium);background:var(--surface-elevated)">
-          <div class="w-16 h-16 rounded-2xl flex items-center justify-center" style="background:rgba(29,164,98,0.08)">
-            <Icon name="i-lucide-folder-open" class="w-8 h-8" style="color:#1da462"/>
-          </div>
-          <div class="text-center">
-            <p class="text-sm font-semibold" style="color:var(--text-primary)">Drag a folder here</p>
-            <p class="text-xs mt-1" style="color:var(--text-tertiary)">Folder structure will be preserved in Google Drive</p>
-          </div>
-          <div class="flex items-center gap-3 mt-2">
-            <div class="h-px flex-1" style="background:var(--border-subtle)"></div>
-            <span class="text-[11px] font-medium" style="color:var(--text-tertiary)">or</span>
-            <div class="h-px flex-1" style="background:var(--border-subtle)"></div>
-          </div>
-          <button class="btn-primary" @click="folderInputRef?.click()">
-            <Icon name="i-lucide-folder-search" class="w-4 h-4"/>Browse Folder
-          </button>
-          <input ref="folderInputRef" type="file" multiple class="hidden" webkitdirectory @change="onFolderInput">
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- RENAME MODAL -->
   <div v-if="renamingFile" class="fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)" @click.self="renamingFile=null">
