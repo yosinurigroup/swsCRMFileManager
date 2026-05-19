@@ -515,6 +515,32 @@ function showToast(msg: string) {
 }
 
 // Keyboard navigation
+const prevFile = computed(() => {
+  if (!dm.selected.value) return null
+  const sorted = dm.sorted.value
+  const idx = sorted.findIndex(f => f.id === dm.selected.value!.id)
+  return idx > 0 ? sorted[idx - 1]! : null
+})
+const nextFile = computed(() => {
+  if (!dm.selected.value) return null
+  const sorted = dm.sorted.value
+  const idx = sorted.findIndex(f => f.id === dm.selected.value!.id)
+  return idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1]! : null
+})
+const selectedIndex = computed(() => {
+  if (!dm.selected.value) return -1
+  return dm.sorted.value.findIndex(f => f.id === dm.selected.value!.id)
+})
+function navigatePrev() {
+  if (!prevFile.value) return
+  dm.openFile(prevFile.value)
+  nextTick(() => document.getElementById('file-item-' + prevFile.value!.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
+function navigateNext() {
+  if (!nextFile.value) return
+  dm.openFile(nextFile.value)
+  nextTick(() => document.getElementById('file-item-' + nextFile.value!.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
 function onKeyDown(e: KeyboardEvent) {
   if (!dm.selected.value) return
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
@@ -523,12 +549,10 @@ function onKeyDown(e: KeyboardEvent) {
   if (idx === -1) return
   if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
     e.preventDefault()
-    const next = sorted[idx + 1]
-    if (next) { dm.openFile(next); nextTick(() => document.getElementById('file-item-' + next.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) }
+    navigateNext()
   } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
     e.preventDefault()
-    const prev = sorted[idx - 1]
-    if (prev) { dm.openFile(prev); nextTick(() => document.getElementById('file-item-' + prev.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) }
+    navigatePrev()
   } else if (e.key === 'Escape') {
     e.preventDefault()
     dm.selected.value = null
@@ -896,18 +920,33 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           <p class="text-sm font-semibold truncate" style="color:var(--text-primary)">{{dm.selected.value.name}}</p>
           <p class="text-[11px]" style="color:var(--text-tertiary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.formatDate(dm.selected.value.modifiedTime)}}</p>
         </div>
+        <!-- Position counter -->
+        <span v-if="dm.sorted.value.length > 1" class="text-[11px] font-medium tabular-nums shrink-0" style="color:var(--text-tertiary)">{{ selectedIndex + 1 }} / {{ dm.sorted.value.length }}</span>
         <button class="btn-ghost" @click="startRename(dm.selected.value)"><Icon name="i-lucide-pencil-line" class="w-3 h-3"/>Rename</button>
         <button class="btn-ghost" @click="dm.openExternal(dm.selected.value)"><Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in Drive</button>
         <button v-if="!dm.isFolder(dm.selected.value) && !dm.isGoogleWorkspace(dm.selected.value)" class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
         <!-- Keyboard nav hint -->
         <div class="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Use arrow keys to navigate">
-          <Icon name="i-lucide-arrow-up" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
-          <Icon name="i-lucide-arrow-down" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
+          <Icon name="i-lucide-arrow-left" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
+          <Icon name="i-lucide-arrow-right" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
           <span class="text-[10px] font-medium ml-0.5" style="color:var(--text-tertiary)">Navigate</span>
         </div>
         <button class="btn-icon" @click="dm.selected.value=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
       </div>
       <div class="relative flex-1 min-h-0 overflow-hidden">
+        <!-- Prev / Next overlay arrows -->
+        <button v-if="prevFile" @click="navigatePrev()"
+          class="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-110"
+          style="background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.12);color:#fff"
+          title="Previous (←)">
+          <Icon name="i-lucide-chevron-left" class="w-5 h-5"/>
+        </button>
+        <button v-if="nextFile" @click="navigateNext()"
+          class="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-110"
+          style="background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.12);color:#fff"
+          title="Next (→)">
+          <Icon name="i-lucide-chevron-right" class="w-5 h-5"/>
+        </button>
         <!-- Video player -->
         <div v-if="dm.isVideo(dm.selected.value)" class="flex items-center justify-center h-full p-4" style="background:#000">
           <video controls autoplay class="max-w-full max-h-full rounded-lg" :src="dm.streamUrl(dm.selected.value)" :key="dm.selected.value.id"></video>
@@ -961,7 +1000,19 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
             allow="autoplay; clipboard-read; clipboard-write"
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
         </div>
-        <!-- Google Drive iframe preview (PDF, images, etc.) -->
+        <!-- Fast image preview (direct img — much faster than iframe) -->
+        <div v-else-if="dm.isImage(dm.selected.value)" class="relative w-full h-full flex items-center justify-center" style="background:#0a0a0a">
+          <img
+            :key="dm.selected.value.id"
+            :src="dm.selected.value.thumbnailLink ? dm.selected.value.thumbnailLink.replace(/=s\d+/, '=s2000') : dm.streamUrl(dm.selected.value)"
+            :alt="dm.selected.value.name"
+            class="max-w-full max-h-full object-contain"
+            style="border-radius:4px"
+            referrerpolicy="no-referrer"
+            @error="($event.target as HTMLImageElement).src = dm.streamUrl(dm.selected.value)"
+          />
+        </div>
+        <!-- Google Drive iframe preview (PDF + other previewable files) -->
         <div v-else-if="dm.canPreview(dm.selected.value)" class="relative w-full h-full">
           <iframe :key="dm.selected.value.id" :src="dm.previewUrl(dm.selected.value)" class="w-full h-full border-0"
             allow="autoplay; clipboard-read; clipboard-write"
