@@ -32,6 +32,7 @@ const uploadTotal = ref(0)
 const uploadCurrent = ref(0)
 const uploadCurrentName = ref('')
 const fileInputRef = ref<HTMLInputElement|null>(null)
+const folderInputRef = ref<HTMLInputElement|null>(null)
 let dragCounter = 0
 
 // Rename state
@@ -80,6 +81,11 @@ const movePickerFiles = ref<DriveFile[]>([])
 const movePickerLoading = ref(false)
 const moveLoading = ref(false)
 
+// ── Internal drag-to-move ────────────────────────────────────────────────────
+const draggingItem = ref<DriveFile|null>(null)
+const dragOverId = ref<string|null>(null)
+const isInternalDrag = ref(false)
+
 onMounted(() => { if(rootId.value) dm.fetchFiles(rootId.value) })
 
 useHead({ title: 'File Manager — SWS Drive' })
@@ -98,6 +104,16 @@ function setView(mode: 'list'|'gallery') {
 function onFileInput(e: Event) {
   const input = e.target as HTMLInputElement
   if(input.files?.length) doUpload(Array.from(input.files), [])
+  input.value = ''
+}
+
+function onFolderInput(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  const files = Array.from(input.files)
+  // webkitRelativePath gives us e.g. "FolderName/sub/file.txt"
+  const paths = files.map(f => (f as any).webkitRelativePath || f.name)
+  doUpload(files, paths)
   input.value = ''
 }
 
@@ -226,14 +242,120 @@ async function doUpload(files: File[], paths: string[]) {
   }
   setTimeout(() => { isUploading.value = false; uploadProgress.value = 0 }, 600)
 }
-function onDragEnter(e: DragEvent) { e.preventDefault(); dragCounter++; isDragging.value = true }
+function onDragEnter(e: DragEvent) {
+  e.preventDefault()
+  if (isInternalDrag.value) return
+  dragCounter++; isDragging.value = true
+}
 function onDragLeave(e: DragEvent) { e.preventDefault(); dragCounter--; if(dragCounter<=0){isDragging.value=false;dragCounter=0} }
 function onDragOver(e: DragEvent) { e.preventDefault() }
+
+// Internal drag-to-move handlers
+function onFileDragStart(e: DragEvent, f: DriveFile) {
+  draggingItem.value = f; isInternalDrag.value = true
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('application/x-sws-move', f.id)
+}
+function onFileDragEnd() { draggingItem.value = null; dragOverId.value = null; isInternalDrag.value = false }
+function onFolderDragOver(e: DragEvent, folderId: string) {
+  if (!isInternalDrag.value || draggingItem.value?.id === folderId) return
+  e.preventDefault(); e.stopPropagation()
+  e.dataTransfer!.dropEffect = 'move'; dragOverId.value = folderId
+}
+function onFolderDragLeave() { dragOverId.value = null }
+async function onFolderDrop(e: DragEvent, folder: DriveFile) {
+  e.preventDefault(); e.stopPropagation(); dragOverId.value = null
+  if (!isInternalDrag.value || !draggingItem.value) return
+  const src = draggingItem.value; isInternalDrag.value = false; draggingItem.value = null
+  const filesToMove = selectedIds.value.has(src.id) && selectedIds.value.size > 1 ? [...selectedFiles.value] : [src]
+  moveLoading.value = true
+  try {
+    for (const f of filesToMove) await dm.moveFile(f.id, folder.id)
+    if (selectedIds.value.has(src.id)) clearSelection()
+    showToast(`${filesToMove.length} item${filesToMove.length > 1 ? 's' : ''} moved to "${folder.name}"`)
+    await dm.fetchFiles(dm.currentFolderId.value!)
+  } catch { showToast('Move failed') } finally { moveLoading.value = false }
+}
+async function onAncestorDrop(e: DragEvent, targetId: string, targetName: string) {
+  e.preventDefault(); e.stopPropagation(); dragOverId.value = null
+  if (!isInternalDrag.value || !draggingItem.value) return
+  const src = draggingItem.value; isInternalDrag.value = false; draggingItem.value = null
+  const filesToMove = selectedIds.value.has(src.id) && selectedIds.value.size > 1 ? [...selectedFiles.value] : [src]
+  moveLoading.value = true
+  try {
+    for (const f of filesToMove) await dm.moveFile(f.id, targetId)
+    if (selectedIds.value.has(src.id)) clearSelection()
+    showToast(`${filesToMove.length} item${filesToMove.length > 1 ? 's' : ''} moved to "${targetName}"`)
+    await dm.fetchFiles(dm.currentFolderId.value!)
+  } catch { showToast('Move failed') } finally { moveLoading.value = false }
+}
+
+/** Recursively collect all File objects + their relative paths from a FileSystemEntry */
+async function collectEntryFiles(entry: FileSystemEntry, basePath: string): Promise<{file: File, path: string}[]> {
+  if (entry.isFile) {
+    return new Promise((resolve) => {
+      (entry as FileSystemFileEntry).file(
+        (f) => resolve([{ file: f, path: basePath ? `${basePath}/${f.name}` : f.name }]),
+        () => resolve([])
+      )
+    })
+  } else if (entry.isDirectory) {
+    const dirEntry = entry as FileSystemDirectoryEntry
+    const dirPath = basePath ? `${basePath}/${dirEntry.name}` : dirEntry.name
+    return new Promise((resolve) => {
+      const reader = dirEntry.createReader()
+      const allEntries: FileSystemEntry[] = []
+      function readBatch() {
+        reader.readEntries(async (batch) => {
+          if (batch.length === 0) {
+            // Done reading; recurse into each child
+            const results: {file: File, path: string}[] = []
+            for (const child of allEntries) {
+              const childFiles = await collectEntryFiles(child, dirPath)
+              results.push(...childFiles)
+            }
+            resolve(results)
+          } else {
+            allEntries.push(...batch)
+            readBatch()
+          }
+        }, () => resolve([]))
+      }
+      readBatch()
+    })
+  }
+  return []
+}
+
 async function onDrop(e: DragEvent) {
   e.preventDefault(); isDragging.value = false; dragCounter = 0
-  if(!e.dataTransfer) return
-  const files = Array.from(e.dataTransfer.files)
-  if(files.length) doUpload(files, files.map(f=>f.name))
+  if (!e.dataTransfer) return
+  // Ignore internal drag-to-move
+  if (isInternalDrag.value || e.dataTransfer.types.includes('application/x-sws-move')) {
+    isInternalDrag.value = false; draggingItem.value = null; dragOverId.value = null; return
+  }
+
+  // Use FileSystem API when available (supports folders)
+  const items = Array.from(e.dataTransfer.items)
+  const hasEntryAPI = items.length > 0 && typeof items[0]!.webkitGetAsEntry === 'function'
+
+  if (hasEntryAPI) {
+    const collected: {file: File, path: string}[] = []
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry()
+      if (entry) {
+        const results = await collectEntryFiles(entry, '')
+        collected.push(...results)
+      }
+    }
+    if (collected.length) {
+      doUpload(collected.map(c => c.file), collected.map(c => c.path))
+    }
+  } else {
+    // Fallback: plain files only
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length) doUpload(files, files.map(f => f.name))
+  }
 }
 
 // Rename
@@ -409,10 +531,24 @@ function showToast(msg: string) {
     </div>
     <!-- Breadcrumbs -->
     <div class="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto no-scrollbar">
-      <button class="text-sm font-bold shrink-0" style="color:var(--text-primary)" @click="dm.goToRoot()">{{dm.rootFolderName.value || 'Files'}}</button>
+      <button
+        class="text-sm font-bold shrink-0 rounded-md px-1 -mx-1 transition-all"
+        :style="{color:'var(--text-primary)', background: dragOverId===rootId?'rgba(139,92,246,0.15)':'transparent', outline: dragOverId===rootId?'2px solid rgba(139,92,246,0.5)':'none'}"
+        @click="dm.goToRoot()"
+        @dragover.prevent="isInternalDrag&&draggingItem?.id!==rootId?(dragOverId=rootId):''"
+        @dragleave="dragOverId=null"
+        @drop="onAncestorDrop($event, rootId, dm.rootFolderName.value||'Files')"
+      >{{dm.rootFolderName.value || 'Files'}}</button>
       <template v-for="(c,i) in dm.folderStack.value" :key="c.id">
         <Icon name="i-lucide-chevron-right" class="w-3.5 h-3.5 shrink-0" style="color:var(--text-tertiary)"/>
-        <button class="text-sm truncate max-w-[180px] shrink-0" :style="{color: i===dm.folderStack.value.length-1?'var(--text-primary)':'var(--text-secondary)', fontWeight: i===dm.folderStack.value.length-1?'600':'400'}" @click="dm.goToBreadcrumb(i)">{{c.name}}</button>
+        <button
+          class="text-sm truncate max-w-[180px] shrink-0 rounded-md px-1 -mx-1 transition-all"
+          :style="{color: i===dm.folderStack.value.length-1?'var(--text-primary)':'var(--text-secondary)', fontWeight: i===dm.folderStack.value.length-1?'600':'400', background: dragOverId===c.id?'rgba(139,92,246,0.15)':'transparent', outline: dragOverId===c.id?'2px solid rgba(139,92,246,0.5)':'none'}"
+          @click="dm.goToBreadcrumb(i)"
+          @dragover.prevent="isInternalDrag&&draggingItem?.id!==c.id?(dragOverId=c.id):''"
+          @dragleave="dragOverId=null"
+          @drop="onAncestorDrop($event, c.id, c.name)"
+        >{{c.name}}</button>
       </template>
     </div>
     <!-- Total size -->
@@ -442,10 +578,20 @@ function showToast(msg: string) {
           </div>
         </Transition>
       </div>
-      <button class="btn-primary" :disabled="isUploading" @click="fileInputRef?.click()">
-        <Icon :name="isUploading?'i-lucide-loader-2':'i-lucide-upload'" class="w-4 h-4" :class="{'animate-spin':isUploading}"/>Upload
-      </button>
+      <!-- Upload split button: files + folder -->
+      <div class="flex items-center rounded-xl overflow-hidden shrink-0" style="border:1.5px solid #1da462">
+        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#1da462,#0f7b3f);color:#fff" :disabled="isUploading" @click="fileInputRef?.click()" title="Upload files">
+          <Icon :name="isUploading?'i-lucide-loader-2':'i-lucide-upload'" class="w-4 h-4" :class="{'animate-spin':isUploading}"/>
+          Upload
+        </button>
+        <div style="width:1px;height:100%;background:rgba(255,255,255,0.25)"></div>
+        <button class="flex items-center gap-1.5 px-3 h-9 text-sm font-semibold transition-all" style="background:linear-gradient(135deg,#178a52,#0c6633);color:#fff" :disabled="isUploading" @click="folderInputRef?.click()" title="Upload folder">
+          <Icon name="i-lucide-folder-up" class="w-4 h-4"/>
+          Folder
+        </button>
+      </div>
       <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileInput">
+      <input ref="folderInputRef" type="file" multiple class="hidden" webkitdirectory @change="onFolderInput">
 
       <!-- User badge -->
       <div v-if="session.authenticated" class="flex items-center gap-2 pl-2 ml-1" style="border-left:1px solid var(--border-subtle)">
@@ -473,7 +619,8 @@ function showToast(msg: string) {
       <div class="w-20 h-20 rounded-3xl flex items-center justify-center animate-bounce" style="background:rgba(29,164,98,0.15)">
         <Icon name="i-lucide-upload-cloud" class="w-10 h-10" style="color:#1da462"/>
       </div>
-      <p class="text-lg font-bold" style="color:#1da462">Drop files here</p>
+      <p class="text-lg font-bold" style="color:#1da462">Drop files or folders here</p>
+      <p class="text-sm" style="color:rgba(29,164,98,0.7)">Folder structures will be preserved</p>
     </div>
   </div>
 
@@ -616,10 +763,16 @@ function showToast(msg: string) {
 
       <!-- File rows (LIST view) -->
       <div v-else-if="viewMode==='list'" class="flex-1 overflow-y-auto">
-        <button v-for="f in dm.sorted.value" :key="f.id"
-          class="group w-full flex items-center gap-3 px-5 py-3 text-left transition-all duration-150"
-          :style="{borderBottom:'1px solid var(--border-subtle)', background: selectedIds.has(f.id)?'rgba(29,164,98,0.08)':dm.selected.value?.id===f.id?'rgba(29,164,98,0.06)':'transparent', borderLeft: selectedIds.has(f.id)?'3px solid #1da462':dm.selected.value?.id===f.id?'3px solid #1da462':'3px solid transparent'}"
+        <div v-for="f in dm.sorted.value" :key="f.id"
+          class="group w-full flex items-center gap-3 px-5 py-3 text-left transition-all duration-150 cursor-pointer select-none"
+          draggable="true"
+          :style="{borderBottom:'1px solid var(--border-subtle)', background: dragOverId===f.id?'rgba(139,92,246,0.1)':selectedIds.has(f.id)?'rgba(29,164,98,0.08)':dm.selected.value?.id===f.id?'rgba(29,164,98,0.06)':'transparent', borderLeft: dragOverId===f.id?'3px solid #8b5cf6':selectedIds.has(f.id)?'3px solid #1da462':dm.selected.value?.id===f.id?'3px solid #1da462':'3px solid transparent'}"
           @click="dm.openFile(f)"
+          @dragstart="onFileDragStart($event, f)"
+          @dragend="onFileDragEnd()"
+          @dragover="dm.isFolder(f) && onFolderDragOver($event, f.id)"
+          @dragleave="dm.isFolder(f) && onFolderDragLeave()"
+          @drop="dm.isFolder(f) && onFolderDrop($event, f)"
         >
           <!-- Checkbox -->
           <div class="w-5 h-5 rounded flex items-center justify-center cursor-pointer shrink-0" :style="{background: selectedIds.has(f.id)?'#1da462':'var(--surface-elevated)', border: '1.5px solid '+(selectedIds.has(f.id)?'#1da462':'var(--border-medium)'),'transition':'all 0.15s'}" @click.stop="toggleSelect(f)">
@@ -646,16 +799,22 @@ function showToast(msg: string) {
             <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Download" @click.stop="dm.downloadFile(f)"><Icon name="i-lucide-download" class="w-3.5 h-3.5" style="color:#3b82f6"/></button>
             <button class="btn-icon" style="width:28px;height:28px" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5" style="color:#ef4444"/></button>
           </div>
-        </button>
+        </div>
       </div>
 
       <!-- GALLERY VIEW -->
       <div v-else class="flex-1 overflow-y-auto p-4">
         <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(148px,1fr))">
           <div v-for="f in dm.sorted.value" :key="f.id"
-            class="group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-200"
-            :style="{background:'var(--surface-card)', border: selectedIds.has(f.id)?'2px solid #1da462':dm.selected.value?.id===f.id?'2px solid rgba(29,164,98,0.5)':'2px solid var(--border-subtle)', boxShadow: selectedIds.has(f.id)||dm.selected.value?.id===f.id?'0 0 0 2px rgba(29,164,98,0.2)':'none', transform:'translateZ(0)'}"
+            class="group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 select-none"
+            draggable="true"
+            :style="{background:'var(--surface-card)', border: dragOverId===f.id?'2px solid #8b5cf6':selectedIds.has(f.id)?'2px solid #1da462':dm.selected.value?.id===f.id?'2px solid rgba(29,164,98,0.5)':'2px solid var(--border-subtle)', boxShadow: dragOverId===f.id?'0 0 0 3px rgba(139,92,246,0.25)':selectedIds.has(f.id)||dm.selected.value?.id===f.id?'0 0 0 2px rgba(29,164,98,0.2)':'none', transform:'translateZ(0)'}"
             @click="dm.openFile(f)"
+            @dragstart="onFileDragStart($event, f)"
+            @dragend="onFileDragEnd()"
+            @dragover="dm.isFolder(f) && onFolderDragOver($event, f.id)"
+            @dragleave="dm.isFolder(f) && onFolderDragLeave()"
+            @drop="dm.isFolder(f) && onFolderDrop($event, f)"
           >
             <!-- Thumbnail area -->
             <div class="relative flex items-center justify-center overflow-hidden" style="aspect-ratio:1;background:var(--surface-elevated)">
