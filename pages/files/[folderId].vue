@@ -102,12 +102,14 @@ function setView(mode: 'list'|'gallery') {
 
 // Upload handlers
 function onFileInput(e: Event) {
+  if (isUploading.value) return // prevent double-fire (Chrome webkitdirectory quirk)
   const input = e.target as HTMLInputElement
   if(input.files?.length) doUpload(Array.from(input.files), [])
   input.value = ''
 }
 
 function onFolderInput(e: Event) {
+  if (isUploading.value) return // prevent double-fire (Chrome webkitdirectory quirk)
   const input = e.target as HTMLInputElement
   if (!input.files?.length) return
   const files = Array.from(input.files)
