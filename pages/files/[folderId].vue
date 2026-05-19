@@ -80,6 +80,24 @@ const movePickerFiles = ref<DriveFile[]>([])
 const movePickerLoading = ref(false)
 const moveLoading = ref(false)
 
+// Context menu state
+const contextMenuFile = ref<DriveFile|null>(null)
+const contextMenuPos = ref<{x:number,y:number}>({x:0,y:0})
+function openContextMenu(f: DriveFile, e: MouseEvent) {
+  e.stopPropagation(); e.preventDefault()
+  contextMenuFile.value = f
+  // Position relative to viewport
+  const menuW = 180, menuH = 280
+  let x = e.clientX, y = e.clientY
+  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW - 8
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 8
+  contextMenuPos.value = {x, y}
+}
+function closeContextMenu() { contextMenuFile.value = null }
+// Close on any click
+onMounted(() => { document.addEventListener('click', closeContextMenu) })
+onUnmounted(() => { document.removeEventListener('click', closeContextMenu) })
+
 // ── Internal drag-to-move ────────────────────────────────────────────────────
 const draggingItem = ref<DriveFile|null>(null)
 const dragOverId = ref<string|null>(null)
@@ -440,7 +458,7 @@ async function fetchMovePickerFiles(fid: string) {
   movePickerLoading.value = true
   try {
     const d = await $fetch<{success:boolean,files:DriveFile[]}>(`/api/drive/files?folderId=${fid}`)
-    movePickerFiles.value = (d.files||[]).filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.id !== movingFile.value?.id && f.name !== '_Archive' && f.name !== '_ConvertedFiles')
+    movePickerFiles.value = (d.files||[]).filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.id !== movingFile.value?.id && f.name !== '_Archive' && f.name !== '_ConvertedFiles' && f.name !== '_archivedOriginals')
   } catch { movePickerFiles.value = [] }
   finally { movePickerLoading.value = false }
 }
@@ -484,6 +502,17 @@ async function createMoveFolder() {
 
 async function doCopy(f: DriveFile) { try { await dm.copyFile(f.id); showToast(`"${f.name}" copied`) } catch {} }
 
+// Forward (share link via clipboard)
+async function forwardFile(f: DriveFile) {
+  const link = f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`
+  try {
+    await navigator.clipboard.writeText(link)
+    showToast('Link copied to clipboard')
+  } catch {
+    showToast('Failed to copy link')
+  }
+}
+
 // Delete with confirmation (archives behind the scenes)
 const deletingFiles = ref<DriveFile[]>([])
 const deleteLoading = ref(false)
@@ -513,9 +542,9 @@ function startBulkMove() {
 // Bulk download
 async function bulkDownload() {
   for (const f of selectedFiles.value) {
-    if (!dm.isFolder(f)) dm.downloadFile(f)
+    dm.downloadFile(f)
   }
-  showToast(`Downloading ${selectedFiles.value.filter(f => !dm.isFolder(f)).length} files`)
+  showToast(`Downloading ${selectedFiles.value.length} items`)
 }
 
 // Toast
@@ -854,14 +883,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           </div>
           <span v-if="!dm.selected.value" class="w-16 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.isFolder(f) ? '—' : dm.formatSize(f.size)}}</span>
           <span v-if="!dm.selected.value" class="w-24 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.formatDate(f.modifiedTime)}}</span>
-          <!-- Inline actions -->
-          <div class="flex items-center gap-0.5 shrink-0" style="width:176px;justify-content:flex-end">
-            <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Open in Drive" @click.stop="dm.openExternal(f)"><Icon name="i-lucide-external-link" class="w-3.5 h-3.5" style="color:#1da462"/></button>
-            <button class="btn-icon" style="width:28px;height:28px" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5" style="color:#f59e0b"/></button>
-            <button class="btn-icon" style="width:28px;height:28px" title="Move" @click.stop="startMove(f)"><Icon name="i-lucide-folder-symlink" class="w-3.5 h-3.5" style="color:#8b5cf6"/></button>
-            <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Copy" @click.stop="doCopy(f)"><Icon name="i-lucide-copy" class="w-3.5 h-3.5" style="color:#6b7280"/></button>
-            <button v-if="!dm.isFolder(f)" class="btn-icon" style="width:28px;height:28px" title="Download" @click.stop="dm.downloadFile(f)"><Icon name="i-lucide-download" class="w-3.5 h-3.5" style="color:#3b82f6"/></button>
-            <button class="btn-icon" style="width:28px;height:28px" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5" style="color:#ef4444"/></button>
+          <!-- Context menu trigger -->
+          <div class="shrink-0">
+            <button class="w-7 h-7 rounded-lg flex items-center justify-center transition-all opacity-0 group-hover:opacity-100" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Actions" @click.stop="openContextMenu(f, $event)"><Icon name="i-lucide-more-vertical" class="w-4 h-4" style="color:var(--text-secondary)"/></button>
           </div>
         </div>
       </div>
@@ -906,12 +930,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
                 @click.stop="toggleSelect(f)">
                 <Icon name="i-lucide-check" class="w-3 h-3 text-white"/>
               </div>
-              <!-- Hover action overlay -->
-              <div class="absolute inset-0 flex items-end justify-center pb-2 gap-1 opacity-0 group-hover:opacity-100 transition-all duration-150" style="background:linear-gradient(to top,rgba(0,0,0,0.6) 0%,transparent 60%)">
-                <button v-if="!dm.isFolder(f)" class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(29,164,98,0.7)" title="Open in Drive" @click.stop="dm.openExternal(f)"><Icon name="i-lucide-external-link" class="w-3.5 h-3.5 text-white"/></button>
-                <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Rename" @click.stop="startRename(f)"><Icon name="i-lucide-pencil-line" class="w-3.5 h-3.5 text-white"/></button>
-                <button v-if="!dm.isFolder(f)" class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(255,255,255,0.15)" title="Download" @click.stop="dm.downloadFile(f)"><Icon name="i-lucide-download" class="w-3.5 h-3.5 text-white"/></button>
-                <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(239,68,68,0.7)" title="Delete" @click.stop="startDelete(f)"><Icon name="i-lucide-trash-2" class="w-3.5 h-3.5 text-white"/></button>
+              <!-- Hover action overlay: single menu icon -->
+              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-150 z-10">
+                <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15)" title="Actions" @click.stop="openContextMenu(f, $event)"><Icon name="i-lucide-more-vertical" class="w-4 h-4 text-white"/></button>
               </div>
             </div>
             <!-- File name + meta -->
@@ -938,7 +959,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
         <span v-if="dm.sorted.value.length > 1" class="text-[11px] font-medium tabular-nums shrink-0" style="color:var(--text-tertiary)">{{ selectedIndex + 1 }} / {{ dm.sorted.value.length }}</span>
         <button class="btn-ghost" @click="startRename(dm.selected.value)"><Icon name="i-lucide-pencil-line" class="w-3 h-3"/>Rename</button>
         <button class="btn-ghost" @click="dm.openExternal(dm.selected.value)"><Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in Drive</button>
-        <button v-if="!dm.isFolder(dm.selected.value) && !dm.isGoogleWorkspace(dm.selected.value)" class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
+        <button v-if="!dm.isGoogleWorkspace(dm.selected.value)" class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
         <!-- Keyboard nav hint -->
         <div class="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Use arrow keys to navigate">
           <Icon name="i-lucide-arrow-left" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
@@ -1033,6 +1054,17 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
           <!-- Cover Google Drive's "open in new tab" icon -->
           <div style="position:absolute;top:0;right:0;width:56px;height:56px;background:var(--surface-elevated);z-index:10;pointer-events:all"></div>
+        </div>
+        <!-- Thumbnail preview fallback (files with thumbnailLink but not otherwise previewable) -->
+        <div v-else-if="dm.selected.value.thumbnailLink" class="relative w-full h-full flex items-center justify-center" style="background:#0a0a0a">
+          <img
+            :key="dm.selected.value.id"
+            :src="dm.selected.value.thumbnailLink.replace(/=s\d+/, '=s2000')"
+            :alt="dm.selected.value.name"
+            class="max-w-full max-h-full object-contain"
+            style="border-radius:4px"
+            referrerpolicy="no-referrer"
+          />
         </div>
         <!-- Fallback -->
         <div v-else class="flex flex-col items-center justify-center h-full gap-4 p-12 text-center">
@@ -1134,6 +1166,52 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
       </div>
     </div>
   </transition>
+
+  <!-- CONTEXT MENU (floating) -->
+  <Teleport to="body">
+    <Transition enter-active-class="transition-all duration-150" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition-all duration-100" leave-from-class="opacity-100" leave-to-class="opacity-0 scale-95">
+      <div v-if="contextMenuFile" class="fixed z-[999]" :style="{left:contextMenuPos.x+'px',top:contextMenuPos.y+'px'}" @click.stop>
+        <div class="rounded-xl overflow-hidden py-1" style="min-width:175px;background:var(--surface-card);border:1px solid var(--border-subtle);box-shadow:0 12px 40px rgba(0,0,0,0.5);backdrop-filter:blur(12px)">
+          <!-- Link -->
+          <button class="ctx-menu-item" @click="dm.openExternal(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-external-link" class="w-4 h-4" style="color:#1da462"/>
+            <span>Open Link</span>
+          </button>
+          <!-- Edit / Rename -->
+          <button class="ctx-menu-item" @click="startRename(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-pencil-line" class="w-4 h-4" style="color:#f59e0b"/>
+            <span>Rename</span>
+          </button>
+          <!-- Copy -->
+          <button class="ctx-menu-item" @click="doCopy(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-copy" class="w-4 h-4" style="color:#6b7280"/>
+            <span>Copy</span>
+          </button>
+          <!-- Download -->
+          <button class="ctx-menu-item" @click="dm.downloadFile(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-download" class="w-4 h-4" style="color:#3b82f6"/>
+            <span>Download</span>
+          </button>
+          <!-- Move -->
+          <button class="ctx-menu-item" @click="startMove(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-folder-symlink" class="w-4 h-4" style="color:#f97316"/>
+            <span>Move</span>
+          </button>
+          <!-- Forward (copy link) -->
+          <button class="ctx-menu-item" @click="forwardFile(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-forward" class="w-4 h-4" style="color:#8b5cf6"/>
+            <span>Forward</span>
+          </button>
+          <div style="height:1px;margin:4px 8px;background:var(--border-subtle)"></div>
+          <!-- Delete -->
+          <button class="ctx-menu-item" @click="startDelete(contextMenuFile!); closeContextMenu()">
+            <Icon name="i-lucide-trash-2" class="w-4 h-4" style="color:#ef4444"/>
+            <span style="color:#ef4444">Delete</span>
+          </button>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 
   <!-- FOOTER -->
   <div class="flex items-center justify-between px-5 py-2 shrink-0" style="border-top:1px solid var(--border-subtle);background:var(--surface-card)">

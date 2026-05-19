@@ -322,3 +322,23 @@ select.input-base {
 .filter-option-selected {
   font-weight: 600;
 }
+
+/* ─── Context Menu ───────────────────────────────────── */
+.ctx-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+.ctx-menu-item:hover {
+  background: var(--surface-hover);
+}
