@@ -511,6 +511,29 @@ function showToast(msg: string) {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2500)
 }
+
+// Keyboard navigation
+function onKeyDown(e: KeyboardEvent) {
+  if (!dm.selected.value) return
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+  const sorted = dm.sorted.value
+  const idx = sorted.findIndex(f => f.id === dm.selected.value!.id)
+  if (idx === -1) return
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+    e.preventDefault()
+    const next = sorted[idx + 1]
+    if (next) { dm.openFile(next); nextTick(() => document.getElementById('file-item-' + next.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) }
+  } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+    e.preventDefault()
+    const prev = sorted[idx - 1]
+    if (prev) { dm.openFile(prev); nextTick(() => document.getElementById('file-item-' + prev.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) }
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    dm.selected.value = null
+  }
+}
+onMounted(() => document.addEventListener('keydown', onKeyDown))
+onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
 </script>
 
 <template>
@@ -764,6 +787,7 @@ function showToast(msg: string) {
       <!-- File rows (LIST view) -->
       <div v-else-if="viewMode==='list'" class="flex-1 overflow-y-auto">
         <div v-for="f in dm.sorted.value" :key="f.id"
+          :id="'file-item-'+f.id"
           class="group w-full flex items-center gap-3 px-5 py-3 text-left transition-all duration-150 cursor-pointer select-none"
           draggable="true"
           :style="{borderBottom:'1px solid var(--border-subtle)', background: dragOverId===f.id?'rgba(139,92,246,0.1)':selectedIds.has(f.id)?'rgba(29,164,98,0.08)':dm.selected.value?.id===f.id?'rgba(29,164,98,0.06)':'transparent', borderLeft: dragOverId===f.id?'3px solid #8b5cf6':selectedIds.has(f.id)?'3px solid #1da462':dm.selected.value?.id===f.id?'3px solid #1da462':'3px solid transparent'}"
@@ -806,6 +830,7 @@ function showToast(msg: string) {
       <div v-else class="flex-1 overflow-y-auto p-4">
         <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(148px,1fr))">
           <div v-for="f in dm.sorted.value" :key="f.id"
+            :id="'file-item-'+f.id"
             class="group relative rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 select-none"
             draggable="true"
             :style="{background:'var(--surface-card)', border: dragOverId===f.id?'2px solid #8b5cf6':selectedIds.has(f.id)?'2px solid #1da462':dm.selected.value?.id===f.id?'2px solid rgba(29,164,98,0.5)':'2px solid var(--border-subtle)', boxShadow: dragOverId===f.id?'0 0 0 3px rgba(139,92,246,0.25)':selectedIds.has(f.id)||dm.selected.value?.id===f.id?'0 0 0 2px rgba(29,164,98,0.2)':'none', transform:'translateZ(0)'}"
@@ -872,6 +897,12 @@ function showToast(msg: string) {
         <button class="btn-ghost" @click="startRename(dm.selected.value)"><Icon name="i-lucide-pencil-line" class="w-3 h-3"/>Rename</button>
         <button class="btn-ghost" @click="dm.openExternal(dm.selected.value)"><Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in Drive</button>
         <button v-if="!dm.isFolder(dm.selected.value) && !dm.isGoogleWorkspace(dm.selected.value)" class="btn-ghost" @click="dm.downloadFile(dm.selected.value)"><Icon name="i-lucide-download" class="w-3 h-3"/>Download</button>
+        <!-- Keyboard nav hint -->
+        <div class="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Use arrow keys to navigate">
+          <Icon name="i-lucide-arrow-up" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
+          <Icon name="i-lucide-arrow-down" class="w-2.5 h-2.5" style="color:var(--text-tertiary)"/>
+          <span class="text-[10px] font-medium ml-0.5" style="color:var(--text-tertiary)">Navigate</span>
+        </div>
         <button class="btn-icon" @click="dm.selected.value=null"><Icon name="i-lucide-x" class="w-4 h-4"/></button>
       </div>
       <div class="relative flex-1 min-h-0 overflow-hidden">
