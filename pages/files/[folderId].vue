@@ -57,6 +57,10 @@ const GDOC_TYPES = [
   { type: 'slides' as const, label: 'Google Slides',       icon: 'i-lucide-presentation', color: '#f97316', bg: 'rgba(249,115,22,0.12)'  },
 ]
 
+// GPN SOW Template
+const GPN_SOW_TEMPLATE_ID = '1pTyX-e6Cgzmtq9sAPmC-rMxjtCKD10BOcdrDS-aZFYM'
+const copyTemplateLoading = ref(false)
+
 // Multi-select state
 const selectedIds = ref<Set<string>>(new Set())
 const isSelectMode = computed(() => selectedIds.value.size > 0)
@@ -429,6 +433,31 @@ function openCreateGdoc(type: 'sheet'|'doc'|'slides') {
   showCreateDropdown.value = false
 }
 
+// Copy GPN SOW Template
+async function copyGpnTemplate() {
+  if (copyTemplateLoading.value) return
+  showCreateDropdown.value = false
+  copyTemplateLoading.value = true
+  try {
+    const r = await $fetch<{success:boolean,file:any}>('/api/drive/copy-template', {
+      method: 'POST',
+      body: {
+        templateFileId: GPN_SOW_TEMPLATE_ID,
+        name: 'GPN SOW TEMPLATE',
+        parentId: dm.currentFolderId.value,
+      },
+    })
+    showToast('GPN SOW Template created')
+    await dm.fetchFiles(dm.currentFolderId.value!)
+    // Open in new tab
+    if (r.file?.id) window.open(`https://docs.google.com/spreadsheets/d/${r.file.id}/edit`, '_blank')
+  } catch {
+    showToast('Failed to create template')
+  } finally {
+    copyTemplateLoading.value = false
+  }
+}
+
 // Close create dropdown on outside click
 onMounted(() => {
   document.addEventListener('click', () => { showCreateDropdown.value = false })
@@ -667,6 +696,19 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
               </div>
               <span class="font-medium text-[13px]">{{gt.label}}</span>
             </button>
+            <!-- Divider -->
+            <div style="height:1px;margin:2px 10px;background:var(--border-subtle)"></div>
+            <!-- GPN SOW Template -->
+            <button
+              class="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors"
+              style="color:var(--text-primary)"
+              :disabled="copyTemplateLoading"
+              @click="copyGpnTemplate()">
+              <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:rgba(16,185,129,0.12)">
+                <Icon :name="copyTemplateLoading ? 'i-lucide-loader-2' : 'i-lucide-file-spreadsheet'" class="w-3.5 h-3.5" :class="{'animate-spin':copyTemplateLoading}" style="color:#10b981"/>
+              </div>
+              <span class="font-medium text-[13px]">GPN SOW Template</span>
+            </button>
           </div>
         </Transition>
       </div>
@@ -885,7 +927,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           <span v-if="!dm.selected.value" class="w-24 text-right text-xs shrink-0" style="color:var(--text-tertiary)">{{dm.formatDate(f.modifiedTime)}}</span>
           <!-- Context menu trigger -->
           <div class="shrink-0">
-            <button class="w-7 h-7 rounded-lg flex items-center justify-center transition-all opacity-0 group-hover:opacity-100" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Actions" @click.stop="openContextMenu(f, $event)"><Icon name="i-lucide-more-vertical" class="w-4 h-4" style="color:var(--text-secondary)"/></button>
+            <button class="w-7 h-7 rounded-lg flex items-center justify-center transition-all" style="background:var(--surface-elevated);border:1px solid var(--border-subtle)" title="Actions" @click.stop="openContextMenu(f, $event)"><Icon name="i-lucide-more-vertical" class="w-4 h-4" style="color:var(--text-secondary)"/></button>
           </div>
         </div>
       </div>
@@ -930,8 +972,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
                 @click.stop="toggleSelect(f)">
                 <Icon name="i-lucide-check" class="w-3 h-3 text-white"/>
               </div>
-              <!-- Hover action overlay: single menu icon -->
-              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-150 z-10">
+              <!-- Action menu icon -->
+              <div class="absolute top-2 right-2 transition-all duration-150 z-10">
                 <button class="w-7 h-7 rounded-lg flex items-center justify-center backdrop-blur-sm" style="background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15)" title="Actions" @click.stop="openContextMenu(f, $event)"><Icon name="i-lucide-more-vertical" class="w-4 h-4 text-white"/></button>
               </div>
             </div>
@@ -1003,22 +1045,20 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
           <p class="text-sm" style="color:var(--text-secondary)">{{dm.formatSize(dm.selected.value.size)}} · {{dm.selected.value.name.split('.').pop()?.toUpperCase()}}</p>
           <button class="btn-primary" @click="dm.downloadFile(dm.selected.value!)"><Icon name="i-lucide-download" class="w-4 h-4"/>Download</button>
         </div>
-        <!-- Google Workspace files (Docs, Sheets, Slides) — open directly in the browser -->
-        <div v-else-if="dm.isGoogleWorkspace(dm.selected.value)" class="flex flex-col items-center justify-center h-full gap-5 p-12 text-center">
-          <div class="w-24 h-24 rounded-3xl flex items-center justify-center" :style="{background:dm.fileColor(dm.selected.value)+'18'}">
-            <Icon :name="dm.fileIcon(dm.selected.value)" class="w-12 h-12" :style="{color:dm.fileColor(dm.selected.value)}"/>
-          </div>
-          <div>
-            <p class="font-bold text-base" style="color:var(--text-primary)">{{dm.selected.value.name}}</p>
-            <p class="text-xs mt-1" style="color:var(--text-tertiary)">{{dm.googleWorkspaceLabel(dm.selected.value)}}</p>
-          </div>
-          <div class="flex flex-col gap-2 w-full max-w-[240px]">
-            <button class="btn-primary w-full justify-center" :style="{background:'linear-gradient(135deg,'+dm.fileColor(dm.selected.value)+','+dm.fileColor(dm.selected.value)+'cc)'}" @click="dm.openExternal(dm.selected.value)">
-              <Icon name="i-lucide-external-link" class="w-4 h-4"/>
-              Open in {{dm.googleWorkspaceLabel(dm.selected.value)}}
+        <!-- Google Workspace files (Docs, Sheets, Slides) — iframe preview -->
+        <div v-else-if="dm.isGoogleWorkspace(dm.selected.value)" class="relative w-full h-full flex flex-col">
+          <div class="flex items-center gap-2 px-4 py-2 shrink-0" style="background:var(--surface-card);border-bottom:1px solid var(--border-subtle)">
+            <Icon :name="dm.fileIcon(dm.selected.value)" class="w-3.5 h-3.5" :style="{color:dm.fileColor(dm.selected.value)}"/>
+            <span class="text-[11px] font-medium flex-1" style="color:var(--text-secondary)">{{dm.googleWorkspaceLabel(dm.selected.value)}}</span>
+            <button class="btn-ghost" style="height:26px;font-size:11px;padding:0 10px" @click="dm.openExternal(dm.selected.value)">
+              <Icon name="i-lucide-external-link" class="w-3 h-3"/>Open in {{dm.googleWorkspaceLabel(dm.selected.value)}}
             </button>
-            <p class="text-[11px]" style="color:var(--text-tertiary)">Opens in a new tab in your browser</p>
           </div>
+          <iframe :key="dm.selected.value.id"
+            :src="dm.previewUrl(dm.selected.value)"
+            class="flex-1 w-full border-0"
+            allow="autoplay; clipboard-read; clipboard-write"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
         </div>
         <!-- Office files (Excel, Word, PowerPoint) — preview via Google Drive viewer -->
         <div v-else-if="dm.isOfficeFile(dm.selected.value)" class="relative w-full h-full flex flex-col">
