@@ -32,6 +32,7 @@ const uploadTotal = ref(0)
 const uploadCurrent = ref(0)
 const uploadCurrentName = ref('')
 const fileInputRef = ref<HTMLInputElement|null>(null)
+const folderInputRef = ref<HTMLInputElement|null>(null)
 const showFolderDrop = ref(false)
 let dragCounter = 0
 
@@ -126,6 +127,17 @@ async function onFolderDropDrop(e: DragEvent) {
     }
   }
   if (collected.length) doUpload(collected.map(c => c.file), collected.map(c => c.path))
+}
+
+function onFolderInput(e: Event) {
+  if (isUploading.value) return
+  showFolderDrop.value = false
+  const input = e.target as HTMLInputElement
+  if (!input.files?.length) return
+  const files = Array.from(input.files)
+  const paths = files.map(f => (f as any).webkitRelativePath || f.name)
+  doUpload(files, paths)
+  input.value = ''
 }
 
 // Threshold: files larger than this use chunked resumable upload
@@ -710,6 +722,15 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
             <p class="text-sm font-semibold" style="color:var(--text-primary)">Drag a folder here</p>
             <p class="text-xs mt-1" style="color:var(--text-tertiary)">Folder structure will be preserved in Google Drive</p>
           </div>
+          <div class="flex items-center gap-3 mt-2">
+            <div class="h-px flex-1" style="background:var(--border-subtle)"></div>
+            <span class="text-[11px] font-medium" style="color:var(--text-tertiary)">or</span>
+            <div class="h-px flex-1" style="background:var(--border-subtle)"></div>
+          </div>
+          <button class="btn-primary" @click="folderInputRef?.click()">
+            <Icon name="i-lucide-folder-search" class="w-4 h-4"/>Browse Folder
+          </button>
+          <input ref="folderInputRef" type="file" multiple class="hidden" webkitdirectory @change="onFolderInput">
         </div>
       </div>
     </div>
