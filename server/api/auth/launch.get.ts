@@ -6,6 +6,12 @@ export default defineEventHandler(async (event) => {
     key?: string
     redirect?: string
     salesRep?: string
+    // GPN SOW fields
+    jobAddress?: string
+    customerName?: string
+    phone?: string
+    projectEmail?: string
+    financeCompany?: string
   }
 
   const config = useRuntimeConfig()
@@ -35,6 +41,12 @@ export default defineEventHandler(async (event) => {
     email: query.email,
     name: query.name || 'User',
     salesRep: query.salesRep || '',
+    // GPN SOW project fields
+    jobAddress: query.jobAddress || '',
+    customerName: query.customerName || '',
+    phone: query.phone || '',
+    projectEmail: query.projectEmail || '',
+    financeCompany: query.financeCompany || '',
     exp: Date.now() + 8 * 60 * 60 * 1000,
     iat: Date.now(),
     nonce: Math.random().toString(36).slice(2),

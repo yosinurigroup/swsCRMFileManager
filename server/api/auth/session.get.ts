@@ -9,6 +9,11 @@ export default defineEventHandler((event) => {
       name: 'Yosi Nuri',
       folderId: '1YWZPhAtQQQevUz0-hl7eDoYeEUjVYP6n',
       salesRep: '',
+      jobAddress: '',
+      customerName: '',
+      phone: '',
+      projectEmail: '',
+      financeCompany: '',
     }
   }
 
@@ -25,5 +30,10 @@ export default defineEventHandler((event) => {
     name: session.name,
     folderId: session.folderId,
     salesRep: session.salesRep || '',
+    jobAddress: session.jobAddress || '',
+    customerName: session.customerName || '',
+    phone: session.phone || '',
+    projectEmail: session.projectEmail || '',
+    financeCompany: session.financeCompany || '',
   }
 })

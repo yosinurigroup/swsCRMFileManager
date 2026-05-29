@@ -6,7 +6,7 @@ const rootId = computed(() => route.params.folderId as string)
 const dm = useDriveManager(rootId)
 
 // Session
-const session = ref<{authenticated:boolean,email?:string,name?:string,folderId?:string}>({authenticated:false})
+const session = ref<{authenticated:boolean,email?:string,name?:string,folderId?:string,salesRep?:string,jobAddress?:string,customerName?:string,phone?:string,projectEmail?:string,financeCompany?:string}>({authenticated:false})
 onMounted(async () => {
   try {
     const s = await $fetch<any>('/api/auth/session')
@@ -439,17 +439,26 @@ async function copyGpnTemplate() {
   showCreateDropdown.value = false
   copyTemplateLoading.value = true
   try {
+    // Use root folder name as file name prefix
+    const folderName = dm.rootFolderName.value || 'Project'
     const r = await $fetch<{success:boolean,file:any}>('/api/drive/copy-template', {
       method: 'POST',
       body: {
         templateFileId: GPN_SOW_TEMPLATE_ID,
-        name: 'GPN SOW TEMPLATE',
+        name: `GPN SOW ${folderName}`,
         parentId: dm.currentFolderId.value,
+        fillData: {
+          jobAddress: session.value.jobAddress || '',
+          customerName: session.value.customerName || '',
+          phone: session.value.phone || '',
+          email: session.value.projectEmail || '',
+          salesRep: session.value.salesRep || '',
+          financeCompany: session.value.financeCompany || '',
+        },
       },
     })
     showToast('GPN SOW Template created')
     await dm.fetchFiles(dm.currentFolderId.value!)
-    // Open in new tab
     if (r.file?.id) window.open(`https://docs.google.com/spreadsheets/d/${r.file.id}/edit`, '_blank')
   } catch {
     showToast('Failed to create template')
