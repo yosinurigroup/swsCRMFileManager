@@ -26,22 +26,22 @@ const sidebarOpen = ref(true)
 const dateOf = ref('SSA')
 const dateFrom = ref('')
 const dateTo = ref('')
-const branch = ref('')
-const vendor = ref('')
-const salesRep = ref('')
-const projectType = ref('')
-const jobStatus = ref('')
-const projectStatus = ref('')
-const projectManager = ref('')
-const financeManager = ref('')
-const engineer = ref('')
-const permitCoordinator = ref('')
-const utility = ref('')
-const solarEquipment = ref('')
-const ssaStatus = ref('')
-const solarInstallStatus = ref('')
-const completionStatus = ref('')
-const finalStatus = ref('')
+const branch = ref<string[]>([])
+const vendor = ref<string[]>([])
+const salesRep = ref<string[]>([])
+const projectType = ref<string[]>([])
+const jobStatus = ref<string[]>([])
+const projectStatus = ref<string[]>([])
+const projectManager = ref<string[]>([])
+const financeManager = ref<string[]>([])
+const engineer = ref<string[]>([])
+const permitCoordinator = ref<string[]>([])
+const utility = ref<string[]>([])
+const solarEquipment = ref<string[]>([])
+const ssaStatus = ref<string[]>([])
+const solarInstallStatus = ref<string[]>([])
+const completionStatus = ref<string[]>([])
+const finalStatus = ref<string[]>([])
 
 const dateOfOptions = ['SSA','Solar Install','MPU Install','Battery Install','Completion','Final','Start-up / Monitor']
 
@@ -119,22 +119,22 @@ function buildParams(): Record<string, string> {
   if (dateOf.value && dateFrom.value && dateTo.value) {
     params.dateOf = dateOf.value; params.dateFrom = dateFrom.value; params.dateTo = dateTo.value
   }
-  if (branch.value) params.branch = branch.value
-  if (vendor.value) params.vendor = vendor.value
-  if (salesRep.value) params.salesRep = salesRep.value
-  if (projectType.value) params.projectType = projectType.value
-  if (jobStatus.value) params.jobStatus = jobStatus.value
-  if (projectStatus.value) params.projectStatus = projectStatus.value
-  if (projectManager.value) params.projectManager = projectManager.value
-  if (financeManager.value) params.financeManager = financeManager.value
-  if (engineer.value) params.engineer = engineer.value
-  if (permitCoordinator.value) params.permitCoordinator = permitCoordinator.value
-  if (utility.value) params.utility = utility.value
-  if (solarEquipment.value) params.solarEquipment = solarEquipment.value
-  if (ssaStatus.value) params.ssaStatus = ssaStatus.value
-  if (solarInstallStatus.value) params.solarInstallStatus = solarInstallStatus.value
-  if (completionStatus.value) params.completionStatus = completionStatus.value
-  if (finalStatus.value) params.finalStatus = finalStatus.value
+  if (branch.value.length) params.branch = branch.value.join(',')
+  if (vendor.value.length) params.vendor = vendor.value.join(',')
+  if (salesRep.value.length) params.salesRep = salesRep.value.join(',')
+  if (projectType.value.length) params.projectType = projectType.value.join(',')
+  if (jobStatus.value.length) params.jobStatus = jobStatus.value.join(',')
+  if (projectStatus.value.length) params.projectStatus = projectStatus.value.join(',')
+  if (projectManager.value.length) params.projectManager = projectManager.value.join(',')
+  if (financeManager.value.length) params.financeManager = financeManager.value.join(',')
+  if (engineer.value.length) params.engineer = engineer.value.join(',')
+  if (permitCoordinator.value.length) params.permitCoordinator = permitCoordinator.value.join(',')
+  if (utility.value.length) params.utility = utility.value.join(',')
+  if (solarEquipment.value.length) params.solarEquipment = solarEquipment.value.join(',')
+  if (ssaStatus.value.length) params.ssaStatus = ssaStatus.value.join(',')
+  if (solarInstallStatus.value.length) params.solarInstallStatus = solarInstallStatus.value.join(',')
+  if (completionStatus.value.length) params.completionStatus = completionStatus.value.join(',')
+  if (finalStatus.value.length) params.finalStatus = finalStatus.value.join(',')
   return params
 }
 
@@ -194,11 +194,11 @@ async function fetchNotes() {
 
 function resetFilters() {
   dateOf.value = 'SSA'; dateFrom.value = ''; dateTo.value = ''
-  branch.value = ''; vendor.value = ''; salesRep.value = ''; projectType.value = ''
-  jobStatus.value = ''; projectStatus.value = ''
-  projectManager.value = ''; financeManager.value = ''; engineer.value = ''
-  permitCoordinator.value = ''; utility.value = ''; solarEquipment.value = ''
-  ssaStatus.value = ''; solarInstallStatus.value = ''; completionStatus.value = ''; finalStatus.value = ''
+  branch.value = []; vendor.value = []; salesRep.value = []; projectType.value = []
+  jobStatus.value = []; projectStatus.value = []
+  projectManager.value = []; financeManager.value = []; engineer.value = []
+  permitCoordinator.value = []; utility.value = []; solarEquipment.value = []
+  ssaStatus.value = []; solarInstallStatus.value = []; completionStatus.value = []; finalStatus.value = []
 }
 
 // Helpers
@@ -348,8 +348,19 @@ function toggleDropdown(model: string) {
 }
 
 function selectItem(model: string, value: string) {
-  filterModels[model].value = filterModels[model].value === value ? '' : value
-  openDropdown.value = null
+  if (!value) {
+    // "All" clicked — clear the array
+    filterModels[model].value = []
+    return
+  }
+  const arr: string[] = filterModels[model].value
+  const idx = arr.indexOf(value)
+  if (idx >= 0) {
+    filterModels[model].value = arr.filter((v: string) => v !== value)
+  } else {
+    filterModels[model].value = [...arr, value]
+  }
+  // Keep dropdown open for multi-select
 }
 
 function getFilteredItems(f: typeof filterDefs[0]): {value: string, label: string}[] {
@@ -360,11 +371,14 @@ function getFilteredItems(f: typeof filterDefs[0]): {value: string, label: strin
 }
 
 function getSelectedLabel(f: typeof filterDefs[0]): string {
-  const val = filterModels[f.model].value
-  if (!val) return 'All'
-  const items = dropdownItems(f.key)
-  const found = items.find(i => i.value === val)
-  return found ? found.label : val
+  const arr: string[] = filterModels[f.model].value
+  if (!arr.length) return 'All'
+  if (arr.length === 1) {
+    const items = dropdownItems(f.key)
+    const found = items.find(i => i.value === arr[0])
+    return found ? found.label : (arr[0] ?? '')
+  }
+  return `${arr.length} selected`
 }
 
 // Map filter model → filterCounts key
@@ -442,36 +456,44 @@ watch(() => session.value.name, () => refreshSavedReports(), { immediate: true }
 function getCurrentFilters() {
   return {
     dateOf: dateOf.value, dateFrom: dateFrom.value, dateTo: dateTo.value,
-    branch: branch.value, vendor: vendor.value, salesRep: salesRep.value,
-    projectType: projectType.value, jobStatus: jobStatus.value, projectStatus: projectStatus.value,
-    projectManager: projectManager.value, financeManager: financeManager.value,
-    engineer: engineer.value, permitCoordinator: permitCoordinator.value,
-    utility: utility.value, solarEquipment: solarEquipment.value,
-    ssaStatus: ssaStatus.value, solarInstallStatus: solarInstallStatus.value,
-    completionStatus: completionStatus.value, finalStatus: finalStatus.value,
+    branch: [...branch.value], vendor: [...vendor.value], salesRep: [...salesRep.value],
+    projectType: [...projectType.value], jobStatus: [...jobStatus.value], projectStatus: [...projectStatus.value],
+    projectManager: [...projectManager.value], financeManager: [...financeManager.value],
+    engineer: [...engineer.value], permitCoordinator: [...permitCoordinator.value],
+    utility: [...utility.value], solarEquipment: [...solarEquipment.value],
+    ssaStatus: [...ssaStatus.value], solarInstallStatus: [...solarInstallStatus.value],
+    completionStatus: [...completionStatus.value], finalStatus: [...finalStatus.value],
     search: search.value,
   }
 }
 
+function _hasVal(v: any): boolean {
+  if (Array.isArray(v)) return v.length > 0
+  return !!v
+}
+function _fmtVal(v: any): string {
+  if (Array.isArray(v)) return v.join(', ')
+  return String(v)
+}
 function getFilterLabels(filters: any): string[] {
   const out: string[] = []
   if (filters.dateFrom && filters.dateTo) out.push(`${filters.dateOf}: ${filters.dateFrom} → ${filters.dateTo}`)
-  if (filters.branch) out.push(`Branch: ${filters.branch}`)
-  if (filters.salesRep) out.push('Sales Rep')
-  if (filters.vendor) out.push('Vendor')
-  if (filters.jobStatus) out.push(`Job: ${filters.jobStatus}`)
-  if (filters.projectStatus) out.push(`Status: ${filters.projectStatus}`)
-  if (filters.projectType) out.push(`Type: ${filters.projectType}`)
-  if (filters.projectManager) out.push('Project Manager')
-  if (filters.financeManager) out.push('Finance Manager')
-  if (filters.engineer) out.push('Engineer')
-  if (filters.permitCoordinator) out.push('Permit')
-  if (filters.utility) out.push(`Utility: ${filters.utility}`)
-  if (filters.solarEquipment) out.push('Solar Equipment')
-  if (filters.ssaStatus) out.push(`SSA: ${filters.ssaStatus}`)
-  if (filters.solarInstallStatus) out.push(`Solar: ${filters.solarInstallStatus}`)
-  if (filters.completionStatus) out.push(`Completion: ${filters.completionStatus}`)
-  if (filters.finalStatus) out.push(`Final: ${filters.finalStatus}`)
+  if (_hasVal(filters.branch)) out.push(`Branch: ${_fmtVal(filters.branch)}`)
+  if (_hasVal(filters.salesRep)) out.push(`Sales Rep (${Array.isArray(filters.salesRep) ? filters.salesRep.length : 1})`)
+  if (_hasVal(filters.vendor)) out.push(`Vendor (${Array.isArray(filters.vendor) ? filters.vendor.length : 1})`)
+  if (_hasVal(filters.jobStatus)) out.push(`Job: ${_fmtVal(filters.jobStatus)}`)
+  if (_hasVal(filters.projectStatus)) out.push(`Status: ${_fmtVal(filters.projectStatus)}`)
+  if (_hasVal(filters.projectType)) out.push(`Type: ${_fmtVal(filters.projectType)}`)
+  if (_hasVal(filters.projectManager)) out.push(`PM (${Array.isArray(filters.projectManager) ? filters.projectManager.length : 1})`)
+  if (_hasVal(filters.financeManager)) out.push(`FM (${Array.isArray(filters.financeManager) ? filters.financeManager.length : 1})`)
+  if (_hasVal(filters.engineer)) out.push(`Engineer (${Array.isArray(filters.engineer) ? filters.engineer.length : 1})`)
+  if (_hasVal(filters.permitCoordinator)) out.push(`Permit (${Array.isArray(filters.permitCoordinator) ? filters.permitCoordinator.length : 1})`)
+  if (_hasVal(filters.utility)) out.push(`Utility: ${_fmtVal(filters.utility)}`)
+  if (_hasVal(filters.solarEquipment)) out.push(`Solar Equip (${Array.isArray(filters.solarEquipment) ? filters.solarEquipment.length : 1})`)
+  if (_hasVal(filters.ssaStatus)) out.push(`SSA: ${_fmtVal(filters.ssaStatus)}`)
+  if (_hasVal(filters.solarInstallStatus)) out.push(`Solar: ${_fmtVal(filters.solarInstallStatus)}`)
+  if (_hasVal(filters.completionStatus)) out.push(`Completion: ${_fmtVal(filters.completionStatus)}`)
+  if (_hasVal(filters.finalStatus)) out.push(`Final: ${_fmtVal(filters.finalStatus)}`)
   if (filters.search) out.push(`"${filters.search}"`)
   return out
 }
@@ -497,27 +519,32 @@ async function doSaveReport() {
   await refreshSavedReports()
 }
 
+function _toArr(v: any): string[] {
+  if (Array.isArray(v)) return [...v]
+  if (typeof v === 'string' && v) return [v]
+  return []
+}
 function applyReport(report: any) {
   const f = report.filters || {}
   dateOf.value = f.dateOf || 'SSA'
   dateFrom.value = f.dateFrom || ''
   dateTo.value = f.dateTo || ''
-  branch.value = f.branch || ''
-  vendor.value = f.vendor || ''
-  salesRep.value = f.salesRep || ''
-  projectType.value = f.projectType || ''
-  jobStatus.value = f.jobStatus || ''
-  projectStatus.value = f.projectStatus || ''
-  projectManager.value = f.projectManager || ''
-  financeManager.value = f.financeManager || ''
-  engineer.value = f.engineer || ''
-  permitCoordinator.value = f.permitCoordinator || ''
-  utility.value = f.utility || ''
-  solarEquipment.value = f.solarEquipment || ''
-  ssaStatus.value = f.ssaStatus || ''
-  solarInstallStatus.value = f.solarInstallStatus || ''
-  completionStatus.value = f.completionStatus || ''
-  finalStatus.value = f.finalStatus || ''
+  branch.value = _toArr(f.branch)
+  vendor.value = _toArr(f.vendor)
+  salesRep.value = _toArr(f.salesRep)
+  projectType.value = _toArr(f.projectType)
+  jobStatus.value = _toArr(f.jobStatus)
+  projectStatus.value = _toArr(f.projectStatus)
+  projectManager.value = _toArr(f.projectManager)
+  financeManager.value = _toArr(f.financeManager)
+  engineer.value = _toArr(f.engineer)
+  permitCoordinator.value = _toArr(f.permitCoordinator)
+  utility.value = _toArr(f.utility)
+  solarEquipment.value = _toArr(f.solarEquipment)
+  ssaStatus.value = _toArr(f.ssaStatus)
+  solarInstallStatus.value = _toArr(f.solarInstallStatus)
+  completionStatus.value = _toArr(f.completionStatus)
+  finalStatus.value = _toArr(f.finalStatus)
   search.value = f.search || ''
   activeReportId.value = report.id
   showLoadModal.value = false
@@ -552,12 +579,12 @@ const filteredSavedReports = computed(() => {
 const activeReport = computed(() => savedReports.value.find((r: any) => r.id === activeReportId.value) || null)
 
 const hasActiveFilters = computed(() => {
-  return !!(dateFrom.value || dateTo.value || branch.value || vendor.value ||
-    salesRep.value || projectType.value || jobStatus.value || projectStatus.value ||
-    projectManager.value || financeManager.value || engineer.value ||
-    permitCoordinator.value || utility.value || solarEquipment.value ||
-    ssaStatus.value || solarInstallStatus.value || completionStatus.value ||
-    finalStatus.value || search.value)
+  return !!(dateFrom.value || dateTo.value || branch.value.length || vendor.value.length ||
+    salesRep.value.length || projectType.value.length || jobStatus.value.length || projectStatus.value.length ||
+    projectManager.value.length || financeManager.value.length || engineer.value.length ||
+    permitCoordinator.value.length || utility.value.length || solarEquipment.value.length ||
+    ssaStatus.value.length || solarInstallStatus.value.length || completionStatus.value.length ||
+    finalStatus.value.length || search.value)
 })
 
 const isCurrentFilterSaved = computed(() => {
@@ -699,7 +726,7 @@ const showSaveButton = computed(() => hasActiveFilters.value && !isCurrentFilter
               <button
                 type="button"
                 class="filter-trigger"
-                :class="{'filter-active': filterModels[f.model].value}"
+                :class="{'filter-active': filterModels[f.model].value.length}"
                 @click.stop="toggleDropdown(f.model)"
               >
                 <span class="truncate">{{ getSelectedLabel(f) }}</span>
@@ -727,23 +754,23 @@ const showSaveButton = computed(() => hasActiveFilters.value && !isCurrentFilter
                 </div>
                 <!-- Options -->
                 <div class="max-h-[220px] overflow-y-auto py-1">
-                  <!-- All option -->
+                  <!-- All option (clears selection) -->
                   <button
                     class="filter-option"
-                    :class="{'filter-option-selected': !filterModels[f.model].value}"
+                    :class="{'filter-option-selected': !filterModels[f.model].value.length}"
                     @click="selectItem(f.model, '')"
                   >
-                    <Icon :name="!filterModels[f.model].value ? 'i-lucide-check' : 'i-lucide-circle'" class="w-3.5 h-3.5 shrink-0" :style="{color: !filterModels[f.model].value ? 'var(--drive-green)' : 'var(--text-tertiary)', opacity: !filterModels[f.model].value ? 1 : 0.3}"/>
+                    <Icon :name="!filterModels[f.model].value.length ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: !filterModels[f.model].value.length ? 'var(--drive-green)' : 'var(--text-tertiary)', opacity: !filterModels[f.model].value.length ? 1 : 0.3}"/>
                     <span>All</span>
                   </button>
                   <button
                     v-for="item in getFilteredItems(f)"
                     :key="item.value"
                     class="filter-option"
-                    :class="{'filter-option-selected': filterModels[f.model].value === item.value}"
+                    :class="{'filter-option-selected': filterModels[f.model].value.includes(item.value)}"
                     @click="selectItem(f.model, item.value)"
                   >
-                    <Icon :name="filterModels[f.model].value === item.value ? 'i-lucide-check' : 'i-lucide-circle'" class="w-3.5 h-3.5 shrink-0" :style="{color: filterModels[f.model].value === item.value ? 'var(--drive-green)' : 'var(--text-tertiary)', opacity: filterModels[f.model].value === item.value ? 1 : 0.3}"/>
+                    <Icon :name="filterModels[f.model].value.includes(item.value) ? 'i-lucide-check-square' : 'i-lucide-square'" class="w-3.5 h-3.5 shrink-0" :style="{color: filterModels[f.model].value.includes(item.value) ? 'var(--drive-green)' : 'var(--text-tertiary)', opacity: filterModels[f.model].value.includes(item.value) ? 1 : 0.3}"/>
                     <span class="truncate">{{ item.label }}</span>
                     <span class="text-[9px] ml-auto shrink-0 tabular-nums" style="color:var(--text-tertiary)">{{ getOptionCount(f.model, item.value) }}</span>
                   </button>

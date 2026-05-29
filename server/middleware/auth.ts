@@ -11,6 +11,9 @@ export default defineEventHandler((event) => {
   // Skip auth routes, transfer admin tool, and webhook endpoints
   if (path.startsWith('/api/auth/') || path.startsWith('/api/transfer/') || path.startsWith('/api/webhook/') || path === '/transfer') return
 
+  // Dev-mode: skip auth checks so reports work on localhost without login
+  if (import.meta.dev) return
+
   if (!isProtectedPage && !isProtectedApi) return
 
   const sessionCookie = getCookie(event, 'sws_session')

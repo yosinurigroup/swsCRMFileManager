@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Exact match filters
+    // Exact match filters (multi-select: comma-separated values)
     const filterMap: Record<string, string> = {
       branch: 'Branch Name', vendor: 'Vendor', salesRep: 'Sales Rep',
       projectType: 'Project Type', projectManager: 'Project Manager',
@@ -34,13 +34,20 @@ export default defineEventHandler(async (event) => {
     }
     for (const [param, column] of Object.entries(filterMap)) {
       if (query[param]) {
-        const pn = `f_${param}`
-        where += ` AND LOWER(\`${column}\`) = LOWER(@${pn})`
-        params[pn] = query[param]
+        const values = query[param].split(',').map((v: string) => v.trim()).filter(Boolean)
+        if (values.length === 1) {
+          const pn = `f_${param}`
+          where += ` AND LOWER(\`${column}\`) = LOWER(@${pn})`
+          params[pn] = values[0]
+        } else if (values.length > 1) {
+          const pn = `f_${param}_arr`
+          where += ` AND LOWER(\`${column}\`) IN UNNEST(@${pn})`
+          params[pn] = values.map((v: string) => v.toLowerCase())
+        }
       }
     }
 
-    // LIKE filters (status fields)
+    // LIKE filters (status fields) — multi-select support
     const likeMap: Record<string, string> = {
       jobStatus: 'Job Status', projectStatus: 'Project Status',
       ssaStatus: 'SSA Status', solarInstallStatus: 'Solar Install Status',
@@ -48,9 +55,19 @@ export default defineEventHandler(async (event) => {
     }
     for (const [param, column] of Object.entries(likeMap)) {
       if (query[param]) {
-        const pn = `like_${param}`
-        where += ` AND LOWER(\`${column}\`) LIKE LOWER(CONCAT('%', @${pn}, '%'))`
-        params[pn] = query[param]
+        const values = query[param].split(',').map((v: string) => v.trim()).filter(Boolean)
+        if (values.length === 1) {
+          const pn = `like_${param}`
+          where += ` AND LOWER(\`${column}\`) LIKE LOWER(CONCAT('%', @${pn}, '%'))`
+          params[pn] = values[0]
+        } else if (values.length > 1) {
+          const conditions = values.map((_: string, i: number) => {
+            const pn = `like_${param}_${i}`
+            params[pn] = values[i]
+            return `LOWER(\`${column}\`) LIKE LOWER(CONCAT('%', @${pn}, '%'))`
+          })
+          where += ` AND (${conditions.join(' OR ')})`
+        }
       }
     }
 

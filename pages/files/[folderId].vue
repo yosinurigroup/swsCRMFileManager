@@ -613,6 +613,49 @@ function navigateNext() {
   dm.openFile(nextFile.value)
   nextTick(() => document.getElementById('file-item-' + nextFile.value!.id)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
 }
+
+// ── Image Zoom ─────────────────────────────────────────────────────────────
+const imgZoom = ref(1)
+const imgPanX = ref(0)
+const imgPanY = ref(0)
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 8
+const ZOOM_STEP = 0.25
+
+function zoomIn() { imgZoom.value = Math.min(imgZoom.value + ZOOM_STEP, MAX_ZOOM) }
+function zoomOut() { imgZoom.value = Math.max(imgZoom.value - ZOOM_STEP, MIN_ZOOM) }
+function zoomReset() { imgZoom.value = 1; imgPanX.value = 0; imgPanY.value = 0 }
+function onPreviewWheel(e: WheelEvent) {
+  e.preventDefault()
+  const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+  imgZoom.value = Math.min(Math.max(imgZoom.value + delta, MIN_ZOOM), MAX_ZOOM)
+}
+
+// Panning state
+let isPanning = false
+let panStartX = 0
+let panStartY = 0
+let panStartPanX = 0
+let panStartPanY = 0
+function onPanStart(e: MouseEvent) {
+  if (imgZoom.value <= 1) return
+  isPanning = true
+  panStartX = e.clientX; panStartY = e.clientY
+  panStartPanX = imgPanX.value; panStartPanY = imgPanY.value
+  e.preventDefault()
+}
+function onPanMove(e: MouseEvent) {
+  if (!isPanning) return
+  imgPanX.value = panStartPanX + (e.clientX - panStartX)
+  imgPanY.value = panStartPanY + (e.clientY - panStartY)
+}
+function onPanEnd() { isPanning = false }
+onMounted(() => { document.addEventListener('mousemove', onPanMove); document.addEventListener('mouseup', onPanEnd) })
+onUnmounted(() => { document.removeEventListener('mousemove', onPanMove); document.removeEventListener('mouseup', onPanEnd) })
+
+// Reset zoom when switching files
+watch(() => dm.selected.value?.id, () => { imgZoom.value = 1; imgPanX.value = 0; imgPanY.value = 0 })
+
 function onKeyDown(e: KeyboardEvent) {
   if (!dm.selected.value) return
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
@@ -628,6 +671,12 @@ function onKeyDown(e: KeyboardEvent) {
   } else if (e.key === 'Escape') {
     e.preventDefault()
     dm.selected.value = null
+  } else if (e.key === '+' || e.key === '=') {
+    e.preventDefault(); zoomIn()
+  } else if (e.key === '-') {
+    e.preventDefault(); zoomOut()
+  } else if (e.key === '0') {
+    e.preventDefault(); zoomReset()
   }
 }
 onMounted(() => document.addEventListener('keydown', onKeyDown))
@@ -1075,17 +1124,31 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
             allow="autoplay; clipboard-read; clipboard-write"
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
         </div>
-        <!-- Fast image preview (direct img — much faster than iframe) -->
-        <div v-else-if="dm.isImage(dm.selected.value)" class="relative w-full h-full flex items-center justify-center" style="background:#0a0a0a">
+        <!-- Fast image preview with zoom (direct img — much faster than iframe) -->
+        <div v-else-if="dm.isImage(dm.selected.value)" class="relative w-full h-full flex items-center justify-center overflow-hidden" style="background:#0a0a0a" @wheel.prevent="onPreviewWheel">
           <img
             :key="dm.selected.value.id"
             :src="dm.selected.value.thumbnailLink ? dm.selected.value.thumbnailLink.replace(/=s\d+/, '=s2000') : dm.streamUrl(dm.selected.value)"
             :alt="dm.selected.value.name"
-            class="max-w-full max-h-full object-contain"
-            style="border-radius:4px"
+            class="max-w-full max-h-full object-contain select-none"
+            :style="{borderRadius:'4px', transform:`scale(${imgZoom}) translate(${imgPanX/imgZoom}px, ${imgPanY/imgZoom}px)`, transition: isPanning ? 'none' : 'transform 0.15s ease-out', cursor: imgZoom > 1 ? 'grab' : 'default'}"
             referrerpolicy="no-referrer"
+            draggable="false"
+            @mousedown="onPanStart"
             @error="($event.target as HTMLImageElement).src = dm.streamUrl(dm.selected.value)"
           />
+          <!-- Zoom controls -->
+          <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-1.5 py-1 rounded-xl" style="background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.1)">
+            <button class="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-white/10" style="color:#fff" title="Zoom out (-)" @click="zoomOut()">
+              <Icon name="i-lucide-minus" class="w-3.5 h-3.5"/>
+            </button>
+            <button class="px-2 h-7 rounded-lg flex items-center justify-center text-[11px] font-semibold tabular-nums transition-all hover:bg-white/10" style="color:#fff;min-width:52px" title="Reset zoom (0)" @click="zoomReset()">
+              {{ Math.round(imgZoom * 100) }}%
+            </button>
+            <button class="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-white/10" style="color:#fff" title="Zoom in (+)" @click="zoomIn()">
+              <Icon name="i-lucide-plus" class="w-3.5 h-3.5"/>
+            </button>
+          </div>
         </div>
         <!-- Google Drive iframe preview (PDF + other previewable files) -->
         <div v-else-if="dm.canPreview(dm.selected.value)" class="relative w-full h-full">
