@@ -8,12 +8,12 @@ export default defineEventHandler((event) => {
       email: 'admin@y2kgrouphosting.com',
       name: 'Yosi Nuri',
       folderId: '1YWZPhAtQQQevUz0-hl7eDoYeEUjVYP6n',
-      salesRep: '',
-      jobAddress: '',
-      customerName: '',
-      phone: '',
-      projectEmail: '',
-      financeCompany: '',
+      salesRep: 'John Smith',
+      jobAddress: '5831 Yarwell Dr, Houston, TX 77096',
+      customerName: 'TEST X TES X',
+      phone: '(555) 123-4567',
+      projectEmail: 'test@example.com',
+      financeCompany: 'GoodLeap',
     }
   }
 

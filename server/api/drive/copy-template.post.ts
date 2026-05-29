@@ -55,25 +55,45 @@ export default defineEventHandler(async (event) => {
         oauth2Client.setCredentials({ refresh_token: driveConfig.refreshToken })
         const sheets = google.sheets({ version: 'v4', auth: oauth2Client })
 
-        // Map field values to cells C3:C8 (matching the template layout)
+        // Get the first sheet's ID and rename it to 'Sheet1'
+        const meta = await sheets.spreadsheets.get({
+          spreadsheetId: newFileId,
+          fields: 'sheets.properties(sheetId,title)',
+        })
+        const firstSheet = meta.data.sheets?.[0]?.properties
+        if (firstSheet && firstSheet.title !== 'Sheet1') {
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: newFileId,
+            requestBody: {
+              requests: [{
+                updateSheetProperties: {
+                  properties: { sheetId: firstSheet.sheetId!, title: 'Sheet1' },
+                  fields: 'title',
+                },
+              }],
+            },
+          })
+        }
+
+        // Each row C:F is a merged cell — write value into C and blank into D,E,F
         const values = [
-          [fillData.jobAddress || ''],       // C3: JOB SITE ADDRESS
-          [fillData.customerName || ''],     // C4: HOMEOWNER NAME
-          [fillData.phone || ''],            // C5: PHONE NUMBER
-          [fillData.email || ''],            // C6: EMAIL ADDRESS
-          [fillData.salesRep || ''],         // C7: REPRESENTATIVE
-          [fillData.financeCompany || ''],   // C8: FINANCING
+          [fillData.jobAddress || '',    '', '', ''],  // C3:F3 JOB SITE ADDRESS
+          [fillData.customerName || '',  '', '', ''],  // C4:F4 HOMEOWNER NAME
+          [fillData.phone || '',         '', '', ''],  // C5:F5 PHONE NUMBER
+          [fillData.email || '',         '', '', ''],  // C6:F6 EMAIL ADDRESS
+          [fillData.salesRep || '',      '', '', ''],  // C7:F7 REPRESENTATIVE
+          [fillData.financeCompany || '','', '', ''],  // C8:F8 FINANCING
         ]
 
         await sheets.spreadsheets.values.update({
           spreadsheetId: newFileId,
-          range: 'Sheet1!C3:C8',
+          range: `'Sheet1'!C3:F8`,
           valueInputOption: 'RAW',
           requestBody: { values },
         })
       } catch (fillErr: any) {
         // Don't fail the whole operation if cell-fill fails — the sheet was already created
-        console.warn('GPN SOW cell fill warning:', fillErr.message)
+        console.error('GPN SOW cell fill error:', fillErr.message, fillErr.response?.data)
       }
     }
 
