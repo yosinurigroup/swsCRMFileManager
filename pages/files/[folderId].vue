@@ -60,6 +60,7 @@ const GDOC_TYPES = [
 // GPN SOW Template
 const GPN_SOW_TEMPLATE_ID = '1pTyX-e6Cgzmtq9sAPmC-rMxjtCKD10BOcdrDS-aZFYM'
 const copyTemplateLoading = ref(false)
+const hasGpnSow = computed(() => dm.files.value.some(f => f.name.startsWith('GPN SOW')))
 
 // Multi-select state
 const selectedIds = ref<Set<string>>(new Set())
@@ -754,19 +755,21 @@ onUnmounted(() => document.removeEventListener('keydown', onKeyDown))
               </div>
               <span class="font-medium text-[13px]">{{gt.label}}</span>
             </button>
-            <!-- Divider -->
-            <div style="height:1px;margin:2px 10px;background:var(--border-subtle)"></div>
-            <!-- GPN SOW Template -->
-            <button
-              class="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors"
-              style="color:var(--text-primary)"
-              :disabled="copyTemplateLoading"
-              @click="copyGpnTemplate()">
-              <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:rgba(16,185,129,0.12)">
-                <Icon :name="copyTemplateLoading ? 'i-lucide-loader-2' : 'i-lucide-file-spreadsheet'" class="w-3.5 h-3.5" :class="{'animate-spin':copyTemplateLoading}" style="color:#10b981"/>
-              </div>
-              <span class="font-medium text-[13px]">GPN SOW Template</span>
-            </button>
+            <!-- Divider + GPN SOW Template (hidden if one already exists) -->
+            <template v-if="!hasGpnSow">
+              <div style="height:1px;margin:2px 10px;background:var(--border-subtle)"></div>
+              <!-- GPN SOW Template -->
+              <button
+                class="w-full flex items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors"
+                style="color:var(--text-primary)"
+                :disabled="copyTemplateLoading"
+                @click="copyGpnTemplate()">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style="background:rgba(16,185,129,0.12)">
+                  <Icon :name="copyTemplateLoading ? 'i-lucide-loader-2' : 'i-lucide-file-spreadsheet'" class="w-3.5 h-3.5" :class="{'animate-spin':copyTemplateLoading}" style="color:#10b981"/>
+                </div>
+                <span class="font-medium text-[13px]">GPN SOW Template</span>
+              </button>
+            </template>
           </div>
         </Transition>
       </div>
